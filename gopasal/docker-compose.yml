@@ -1,0 +1,145 @@
+# GoPasal — local development infrastructure.
+# Brings up PostgreSQL (with PostGIS) and Redis for the API.
+#   docker compose up -d          (or: pnpm db:up)
+# Then from the repo root:  pnpm db:migrate && pnpm db:seed && pnpm dev:api
+#
+# HOST PORTS ARE NON-DEFAULT ON PURPOSE: PostgreSQL is published on 127.0.0.1:15432
+# and Redis on 127.0.0.1:6380, so GoPasal never collides with — or worse, silently
+# connects to — a PostgreSQL/Redis already running on this machine. Container-internal
+# ports are the normal 5432/6379. apps/api/.env must use the host ports.
+#
+# 15432 rather than 5433 because 5433 is not safe either: Debian/Ubuntu assign
+# additional PostgreSQL clusters 5433, 5434, … in order, so the "next port along"
+# is the most likely one to be taken. Check before starting, and change both the
+# compose mapping and apps/api/.env in one step if it is:
+#
+#   pnpm db:portcheck            # can Docker actually bind these? (binds, like Docker does)
+#   pnpm db:setports 15533 6480  # writes ./.env + apps/api/.env together, no drift
+#
+# If the API cannot authenticate against PostgreSQL, run `pnpm db:doctor` before
+# changing anything here — it distinguishes a stale volume from a foreign server
+# occupying the host port, and never deletes data.
+#
+# Everything the API needs that is not a paid third-party account runs here:
+# PostgreSQL, Redis, and — under the optional "s3" profile — MinIO, which speaks
+# the same S3 API as Cloudflare R2 / AWS S3 / DigitalOcean Spaces so the
+# production storage code path can be exercised locally.
+#
+#   docker compose up -d                    # postgres + redis (STORAGE_PROVIDER=local)
+#   docker compose --profile s3 up -d       # …plus MinIO (STORAGE_PROVIDER=s3)
+#
+# What is NOT here, and why: SMS, maps, payments and push are not emulated. Each
+# one has a real, honest local implementation selected by a *_PROVIDER variable —
+# SMS_PROVIDER=log prints the one-time code to the API log, MAP_PROVIDER=osm
+# computes distances locally, PUSH_PROVIDER=log, and payments use Cash on Delivery
+# (eSewa/Khalti point at the vendors' own published sandboxes, not at a local
+# imitation of a gateway). Nothing "runs in mock mode" pretending to succeed:
+# see apps/api/.env.example, which documents the development and the production
+# setting for every one of them.
+
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    container_name: gopasal-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: gopasal
+      POSTGRES_PASSWORD: gopasal_dev_pw
+      POSTGRES_DB: gopasal
+    ports:
+      # HOST 127.0.0.1:15432 -> CONTAINER 5432. Two separate reasons for each half:
+      #
+      #   * the port is not 5432 (nor 5433) because this machine already has other
+      #     PostgreSQL servers on both. Binding a taken port either fails outright or
+      #     — worse — leaves your app talking to that other server, which reports the
+      #     missing 'gopasal' role as "password authentication failed".
+      #   * the address is 127.0.0.1, not the 0.0.0.0 Docker would default to, so this
+      #     dev database with its dev password is not reachable from the LAN.
+      #
+      # Override the port without editing this file (pnpm db:setports writes both this
+      # variable, in ./.env, and apps/api/.env, so the two cannot drift):
+      #   pnpm db:setports 15533 6480
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-15432}:5432"
+    volumes:
+      - gopasal_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gopasal -d gopasal"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: gopasal-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      # HOST 127.0.0.1:6380 -> CONTAINER 6379, for the same two reasons as PostgreSQL
+      # above — and localhost-only matters more here, because this Redis has no
+      # password at all. Must match REDIS_PORT in apps/api/.env.
+      - "127.0.0.1:${REDIS_HOST_PORT:-6380}:6379"
+    volumes:
+      - gopasal_redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── optional: local S3 ────────────────────────────────────────────────────────
+  # Only starts with `--profile s3`, because the default STORAGE_PROVIDER=local
+  # writes to ./apps/api/uploads and needs nothing running. Switch to MinIO when
+  # you want the *production* code path — signed SigV4 PUT/DELETE against a real
+  # S3 API — under test locally. Same code, different endpoint.
+  minio:
+    image: minio/minio:RELEASE.2024-09-13T20-26-02Z
+    container_name: gopasal-minio
+    profiles: ["s3"]
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      # Development-only credentials, and they never leave this machine: both
+      # ports are bound to 127.0.0.1. apps/api/.env must repeat them as
+      # S3_ACCESS_KEY / S3_SECRET_KEY.
+      MINIO_ROOT_USER: gopasal_dev
+      MINIO_ROOT_PASSWORD: gopasal_dev_secret
+    ports:
+      # HOST 127.0.0.1:19000 -> CONTAINER 9000 (S3 API), and 19001 -> 9001 (console).
+      # Non-default host ports for the same reason as PostgreSQL above: 9000 is one
+      # of the most contended ports on a developer machine (Portainer, SonarQube,
+      # php-fpm, other MinIOs). Override without editing this file by setting
+      # MINIO_API_HOST_PORT / MINIO_CONSOLE_HOST_PORT in ./.env, and keep
+      # S3_ENDPOINT in apps/api/.env in step.
+      - "127.0.0.1:${MINIO_API_HOST_PORT:-19000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_HOST_PORT:-19001}:9001"
+    volumes:
+      - gopasal_miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # One-shot: create the bucket and allow anonymous GET on it, so the URLs the API
+  # hands to browsers work without pre-signing — which is what a public product
+  # image bucket looks like in production too. Exits 0 and stays exited.
+  minio-init:
+    image: minio/mc:RELEASE.2024-09-16T17-43-14Z
+    container_name: gopasal-minio-init
+    profiles: ["s3"]
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set gp http://minio:9000 gopasal_dev gopasal_dev_secret &&
+      mc mb --ignore-existing gp/${S3_BUCKET:-gopasal-dev} &&
+      mc anonymous set download gp/${S3_BUCKET:-gopasal-dev} &&
+      echo 'bucket ${S3_BUCKET:-gopasal-dev} ready'
+      "
+    restart: "no"
+
+volumes:
+  gopasal_pgdata:
+  gopasal_redisdata:
+  gopasal_miniodata:

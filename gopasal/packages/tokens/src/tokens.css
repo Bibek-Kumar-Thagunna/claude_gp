@@ -1,0 +1,76 @@
+/**
+ * GoPasal brand CSS variables.
+ * Imported once at the web app root. Also declares dark-mode overrides
+ * and the reduced-motion fallback flag.
+ */
+
+:root {
+  /* crimson */
+  --gp-crimson-50: #ffecf0;
+  --gp-crimson-100: #ffd3dd;
+  --gp-crimson-200: #fca9bb;
+  --gp-crimson-300: #f87a94;
+  --gp-crimson-400: #f04d70;
+  --gp-crimson: #e11945;
+  --gp-crimson-600: #c51139;
+  --gp-crimson-700: #b60e33;
+  --gp-crimson-800: #920a28;
+  --gp-crimson-900: #6e0a20;
+
+  /* ink */
+  --gp-ink-900: #1b1220;
+  --gp-ink-800: #2a1f33;
+  --gp-ink-700: #453a4f;
+  --gp-ink-600: #5f5468;
+  --gp-ink-500: #7c7185;
+  --gp-ink-400: #9c93a3;
+  --gp-ink-300: #c3bcc9;
+  --gp-ink-200: #e4dfe8;
+  --gp-ink-100: #f1eef3;
+  --gp-ink-50: #f8f6fa;
+
+  /* support */
+  --gp-blue: #2540e8;
+  --gp-green: #0e9f6e;
+  --gp-marigold: #f6a609;
+  --gp-red: #e02424;
+
+  /* surfaces */
+  --gp-paper: #fff8f5;
+  --gp-surface: #ffffff;
+  --gp-border: rgba(27, 18, 32, 0.08);
+
+  /* text roles */
+  --gp-text: var(--gp-ink-900);
+  --gp-text-muted: var(--gp-ink-600);
+  --gp-text-subtle: var(--gp-ink-400);
+
+  /* fonts */
+  --gp-font-display: "Baloo 2", "Poppins", system-ui, sans-serif;
+  --gp-font-body: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --gp-font-devanagari: "Hind", "Noto Sans Devanagari", system-ui, sans-serif;
+
+  /* radii + shadows */
+  --gp-radius-md: 12px;
+  --gp-radius-lg: 16px;
+  --gp-radius-xl: 20px;
+  --gp-shadow-sm: 0 2px 8px rgba(27, 18, 32, 0.08);
+  --gp-shadow-md: 0 8px 24px rgba(27, 18, 32, 0.1);
+  --gp-shadow-lg: 0 16px 48px rgba(27, 18, 32, 0.14);
+  --gp-shadow-crimson: 0 12px 32px rgba(225, 25, 69, 0.28);
+
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="system"],
+  :root[data-theme="dark"] {
+    --gp-paper: #140d18;
+    --gp-surface: #1e1524;
+    --gp-border: rgba(255, 255, 255, 0.08);
+    --gp-text: #f7f2fb;
+    --gp-text-muted: #c3bcc9;
+    --gp-text-subtle: #9c93a3;
+    color-scheme: dark;
+  }
+}

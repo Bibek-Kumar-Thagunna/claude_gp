@@ -1,0 +1,152 @@
+@import "@gopasal/tokens/tokens.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --gp-header-h: 68px;
+  }
+
+  * {
+    border-color: var(--gp-border);
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--gp-paper);
+    color: var(--gp-text);
+    font-family: var(--gp-font-body);
+    font-feature-settings: "cv11", "ss01";
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  :lang(ne),
+  .deva {
+    font-family: var(--gp-font-devanagari);
+  }
+
+  ::selection {
+    background: var(--gp-crimson);
+    color: #fff;
+  }
+
+  h1, h2, h3, h4 {
+    font-family: var(--gp-font-display);
+    letter-spacing: -0.02em;
+    color: var(--gp-text);
+  }
+
+  /* Focus ring — accessible, on-brand */
+  :focus-visible {
+    outline: 2px solid var(--gp-crimson);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+}
+
+@layer components {
+  .gp-container {
+    width: 100%;
+    margin-inline: auto;
+    padding-inline: clamp(1rem, 4vw, 2.5rem);
+    max-width: 1280px;
+  }
+
+  @media (min-width: 1920px) {
+    .gp-container {
+      max-width: 1520px;
+    }
+  }
+  @media (min-width: 2560px) {
+    .gp-container {
+      max-width: 1840px;
+    }
+  }
+
+  .gp-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border-radius: 9999px;
+    font-weight: 600;
+    transition: transform 0.15s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+    white-space: nowrap;
+  }
+  .gp-btn:active {
+    transform: translateY(1px) scale(0.99);
+  }
+
+  .gp-btn-primary {
+    background: linear-gradient(135deg, var(--gp-crimson) 0%, var(--gp-crimson-700) 100%);
+    color: #fff;
+    box-shadow: var(--gp-shadow-crimson);
+  }
+  .gp-btn-primary:hover {
+    box-shadow: 0 16px 40px rgba(225, 25, 69, 0.36);
+  }
+
+  .gp-card {
+    background: var(--gp-surface);
+    border: 1px solid var(--gp-border);
+    border-radius: var(--gp-radius-lg);
+    box-shadow: var(--gp-shadow-sm);
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s ease;
+  }
+  .gp-card:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--gp-shadow-md);
+  }
+
+  /* Skeleton shimmer */
+  .gp-skeleton {
+    position: relative;
+    overflow: hidden;
+    background: var(--gp-ink-100);
+    border-radius: var(--gp-radius-md);
+  }
+  .gp-skeleton::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 255, 255, 0.65),
+      transparent
+    );
+    animation: gp-shimmer 1.6s infinite;
+  }
+  @keyframes gp-shimmer {
+    100% {
+      transform: translateX(100%);
+    }
+  }
+
+  /* Subtle lokta-paper texture dots for premium hero */
+  .gp-dot-grid {
+    background-image: radial-gradient(rgba(225, 25, 69, 0.08) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+}
+
+/* Respect reduced motion everywhere */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

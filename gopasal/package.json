@@ -1,0 +1,51 @@
+{
+  "name": "gopasal",
+  "version": "0.1.0",
+  "private": true,
+  "description": "GoPasal — hyperlocal commerce platform for Nepal. Monorepo: web (Next.js) + apps (Expo) + shared design tokens.",
+  "author": "Velayon Dynamics Pvt. Ltd.",
+  "license": "UNLICENSED",
+  "packageManager": "pnpm@9.7.0",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "dev:api": "turbo run dev --filter=@gopasal/api",
+    "dev:customer": "turbo run dev --filter=@gopasal/web-customer",
+    "dev:seller": "turbo run dev --filter=@gopasal/web-seller",
+    "dev:admin": "turbo run dev --filter=@gopasal/web-admin",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "clean": "turbo run clean && rm -rf node_modules",
+    "db:up": "node scripts/db-ports.mjs check && docker compose up -d",
+    "db:down": "docker compose down",
+    "db:recreate": "node scripts/db-ports.mjs check && docker compose up -d --force-recreate postgres redis",
+    "db:ports": "docker compose ps postgres redis",
+    "db:portcheck": "node scripts/db-ports.mjs check",
+    "db:portfind": "node scripts/db-ports.mjs find",
+    "db:setports": "node scripts/db-ports.mjs set",
+    "db:probe": "node scripts/pg-probe.mjs",
+    "db:doctor": "bash scripts/db-doctor.sh",
+    "db:repair": "bash scripts/db-doctor.sh --repair",
+    "db:migrate": "pnpm --filter @gopasal/api prisma:migrate",
+    "db:seed": "pnpm --filter @gopasal/api db:seed",
+    "db:reset": "pnpm --filter @gopasal/api db:reset",
+    "db:studio": "pnpm --filter @gopasal/api prisma:studio",
+    "verify:uploads": "node scripts/verify-uploads-e2e.mjs"
+  },
+  "devDependencies": {
+    "turbo": "^2.1.0",
+    "typescript": "^5.5.4",
+    "prettier": "^3.3.3"
+  },
+  "pnpm": {
+    "overrides": {
+      "react": "19.0.0-rc-65a56d0e-20241020",
+      "react-dom": "19.0.0-rc-65a56d0e-20241020"
+    }
+  }
+}

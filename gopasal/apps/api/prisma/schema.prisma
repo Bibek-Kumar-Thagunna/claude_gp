@@ -1,0 +1,1225 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// GoPasal — Prisma schema
+// Hyperlocal commerce platform for Nepal. Covers the customer, seller and admin
+// surfaces: identity + custom RBAC, catalog, orders, self-delivery with live
+// rider tracking, payments, engagement (coupons/loyalty/referrals/Gold/group),
+// support/disputes, policy versioning, fraud and audit.
+//
+// Geo: lat/lng are stored as Float pairs. Radius / "within delivery zone"
+// queries run through raw SQL using PostGIS (ST_DWithin / ST_DistanceSphere) —
+// the postgis extension is enabled in the initial migration. Keeping the
+// columns as plain floats keeps them portable while still allowing geo queries.
+// ─────────────────────────────────────────────────────────────────────────────
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [postgis]
+}
+
+// ═════════════════════════════════════ IDENTITY ═════════════════════════════
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  DELETED
+}
+
+/// Every human on the platform — customers, seller staff, admins and riders —
+/// is a User. What they can do is decided entirely by RBAC memberships.
+model User {
+  id        String     @id @default(cuid())
+  phone     String     @unique // E.164 without +, Nepal convention (98XXXXXXXX)
+  email     String?    @unique
+  name      String?
+  avatarUrl String?
+  status    UserStatus @default(ACTIVE)
+  locale    String     @default("en") // "en" | "np"
+
+  // convenience flags (denormalised for fast surface routing; RBAC is authoritative)
+  isPlatformStaff Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  addresses           Address[]
+  ownedShops          Shop[]                  @relation("ShopOwner")
+  shopMemberships     ShopMembership[]
+  platformMembership  PlatformMembership?
+  rider               Rider?
+  sessions            Session[]
+  orders              Order[]                 @relation("CustomerOrders")
+  reviews             Review[]
+  notifications       Notification[]
+  supportTickets      SupportTicket[]         @relation("TicketOwner")
+  ticketMessages      TicketMessage[]
+  cart                Cart?
+  loyaltyAccount      LoyaltyAccount?
+  loyaltyTxns         LoyaltyTransaction[]
+  referralsMade       Referral[]              @relation("Referrer")
+  referralReceived    Referral?               @relation("Referee")
+  subscription        Subscription?
+  hostedGroupOrders   GroupOrder[]            @relation("GroupHost")
+  groupParticipations GroupOrderParticipant[]
+  auditLogs           AuditLog[]
+  policyAcceptances   PolicyAcceptance[]
+  couponRedemptions   CouponRedemption[]
+  fraudFlagsRaised    FraudFlag[]             @relation("FraudReporter")
+
+  // onboarding & access provisioning
+  shopApplications     ShopApplication[]      @relation("ShopApplicant")
+  applicationsReviewed ShopApplication[]      @relation("ApplicationReviewer")
+  applicationEvents    ShopApplicationEvent[] @relation("ApplicationEventActor")
+  invitesSent          StaffInvite[]          @relation("InviteSender")
+  invitesAccepted      StaffInvite[]          @relation("InviteAcceptor")
+
+  @@index([status])
+}
+
+/// One-time password challenge (login/signup). Code is hashed at rest.
+model OtpChallenge {
+  id         String    @id @default(cuid())
+  identifier String // phone or email
+  channel    String    @default("sms") // "sms" | "email"
+  codeHash   String
+  purpose    String    @default("login")
+  attempts   Int       @default(0)
+  consumedAt DateTime?
+  expiresAt  DateTime
+  createdAt  DateTime  @default(now())
+
+  @@index([identifier, purpose])
+  @@index([expiresAt])
+}
+
+/// Refresh-token backed session. Access tokens are short-lived JWTs; the
+/// refresh token hash lives here so sessions can be listed and revoked.
+model Session {
+  id               String    @id @default(cuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokenHash String    @unique
+  userAgent        String?
+  ip               String?
+  surface          String    @default("customer") // customer | seller | admin | rider
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  createdAt        DateTime  @default(now())
+  lastUsedAt       DateTime  @default(now())
+
+  @@index([userId])
+}
+
+// ═════════════════════════════════════ RBAC ═════════════════════════════════
+// Custom, editable, default-deny RBAC. Two scopes:
+//   PLATFORM — admin.gopasal.com (Super Admin, Ops, Support, Compliance, Finance)
+//   SHOP     — seller.gopasal.com (Owner, Manager, Order Handler, Inventory,
+//              Support, Delivery). Owners can clone/edit roles per shop.
+// Super Admin (platform) and Owner (shop) short-circuit to "allow all" in guards.
+
+enum RbacScope {
+  PLATFORM
+  SHOP
+}
+
+model Permission {
+  key         String           @id // e.g. "orders.accept", "catalog.edit", "rbac.manage"
+  label       String
+  description String?
+  scope       RbacScope
+  group       String // UI grouping, e.g. "Orders", "Catalog", "Team"
+  roles       RolePermission[]
+}
+
+model Role {
+  id           String    @id @default(cuid())
+  name         String
+  description  String?
+  scope        RbacScope
+  /// null for PLATFORM roles and for SHOP role *templates*; set for a shop's
+  /// own customised roles.
+  shopId       String?
+  shop         Shop?     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  /// system roles are seeded and cannot be deleted (but shop owners may clone).
+  isSystem     Boolean   @default(false)
+  /// Owner/Super-Admin style role that bypasses granular checks.
+  isPrivileged Boolean   @default(false)
+
+  permissions         RolePermission[]
+  shopMemberships     ShopMembership[]
+  platformMemberships PlatformMembership[]
+  invites             StaffInvite[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([scope, shopId, name])
+  @@index([shopId])
+}
+
+model RolePermission {
+  roleId        String
+  role          Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permissionKey String
+  permission    Permission @relation(fields: [permissionKey], references: [key], onDelete: Cascade)
+
+  @@id([roleId, permissionKey])
+}
+
+model PlatformMembership {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roleId    String
+  role      Role     @relation(fields: [roleId], references: [id])
+  createdAt DateTime @default(now())
+}
+
+enum MembershipStatus {
+  INVITED
+  ACTIVE
+  SUSPENDED
+}
+
+model ShopMembership {
+  id         String           @id @default(cuid())
+  userId     String
+  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shopId     String
+  shop       Shop             @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  roleId     String
+  role       Role             @relation(fields: [roleId], references: [id])
+  /// Only ACTIVE memberships grant permissions (see RbacService), so in practice
+  /// a row is either ACTIVE or SUSPENDED. INVITED is the column default but no
+  /// code path writes it: accepting an invite creates the membership ACTIVE
+  /// (InvitesService), as does claiming a shop's owner membership (ShopsService),
+  /// and a *pending* invite is a StaffInvite row rather than a placeholder
+  /// membership. The value is kept for rows written before that split and so the
+  /// default is not a permission-granting state.
+  status     MembershipStatus @default(INVITED)
+  invitedAt  DateTime?
+  acceptedAt DateTime?
+  createdAt  DateTime         @default(now())
+
+  @@unique([userId, shopId])
+  @@index([shopId])
+}
+
+// ══════════════════════════════ ACCESS PROVISIONING ═════════════════════════
+//
+// How a person actually *receives* access. A role assignment on its own is not
+// access: somebody has to be told, by a channel they control, that an account is
+// waiting for them. An invite is that message, and it is a first-class record so
+// the owner can see whether it was delivered, resend it, or revoke it.
+
+enum InviteStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+  EXPIRED
+}
+
+/// A pending grant of console access, addressed to a phone number.
+///
+/// Neither the link token nor the spoken code is stored in the clear. The token
+/// is 32 random bytes, so a SHA-256 digest is enough to look it up without
+/// making it recoverable from a database dump; the short code is guessable by
+/// design, so it is only ever checked against an invite already located by
+/// phone number, and attempts are counted.
+model StaffInvite {
+  id     String    @id @default(cuid())
+  scope  RbacScope
+  shopId String?
+  shop   Shop?     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  roleId String
+  role   Role      @relation(fields: [roleId], references: [id])
+
+  /// normalised Nepal phone; the invite is only acceptable by this number
+  phone String
+  name  String?
+  note  String?
+
+  tokenHash String @unique
+  codeHash  String
+  attempts  Int    @default(0)
+
+  status     InviteStatus @default(PENDING)
+  expiresAt  DateTime
+  lastSentAt DateTime     @default(now())
+  sendCount  Int          @default(1)
+  /// what the last delivery attempt did — "sent", "queued", "failed: …"
+  delivery   String?
+
+  invitedById  String
+  invitedBy    User      @relation("InviteSender", fields: [invitedById], references: [id])
+  acceptedAt   DateTime?
+  acceptedById String?
+  acceptedBy   User?     @relation("InviteAcceptor", fields: [acceptedById], references: [id])
+  revokedAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([phone, status])
+  @@index([shopId, status])
+  @@index([expiresAt])
+}
+
+// ═════════════════════════════════════ CATALOG ══════════════════════════════
+
+enum ShopStatus {
+  PENDING // submitted, awaiting admin approval
+  ACTIVE
+  SUSPENDED
+  REJECTED
+}
+
+// ═══════════════════════════════ SELLER ONBOARDING ══════════════════════════
+//
+// A shop is not created by filling in a form — it is created by GoPasal
+// approving an application. The application is therefore the record of truth for
+// everything the reviewer needs and everything the applicant is told, and it
+// outlives the decision so a rejection can be revised and resubmitted rather
+// than retyped.
+
+enum ApplicationStatus {
+  DRAFT // applicant is still filling it in; only they can see it
+  SUBMITTED // in the review queue
+  UNDER_REVIEW // a reviewer has picked it up
+  CHANGES_REQUESTED // sent back with specific asks; applicant may edit + resubmit
+  APPROVED // shop created, owner membership granted
+  REJECTED // declined; reason is shown to the applicant
+  WITHDRAWN // applicant pulled it
+}
+
+enum ShopDocumentKind {
+  CITIZENSHIP_FRONT
+  CITIZENSHIP_BACK
+  PAN_CERTIFICATE
+  VAT_CERTIFICATE
+  BUSINESS_LICENCE
+  SHOP_PHOTO
+  OWNER_PHOTO
+  BANK_PROOF
+  OTHER
+}
+
+enum DocumentReviewState {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+enum PayoutMethod {
+  BANK
+  ESEWA
+  KHALTI
+}
+
+model ShopApplication {
+  id          String            @id @default(cuid())
+  /// short human handle used in SMS and support conversations, e.g. "GP-7K3QD2"
+  reference   String            @unique
+  applicantId String
+  applicant   User              @relation("ShopApplicant", fields: [applicantId], references: [id], onDelete: Cascade)
+  status      ApplicationStatus @default(DRAFT)
+
+  // ─── shop identity ───
+  shopName    String?
+  shopNameNp  String?
+  categoryId  String?
+  category    Category? @relation(fields: [categoryId], references: [id])
+  description String?
+
+  // ─── contact + location + service area ───
+  contactPhone     String?
+  contactEmail     String?
+  area             String?
+  fullAddress      String?
+  lat              Float?
+  lng              Float?
+  deliveryRadiusKm Float   @default(3)
+  hours            String?
+  soloMode         Boolean @default(false)
+
+  // ─── the person behind it ───
+  ownerName     String?
+  ownerNameNp   String?
+  citizenshipNo String?
+
+  // ─── business registration (optional: many Nepali shops are unregistered) ───
+  registrationNo String?
+  panNo          String?
+  vatNo          String?
+
+  // ─── how they get paid ───
+  payoutMethod    PayoutMethod?
+  bankName        String?
+  bankBranch      String?
+  bankAccountNo   String?
+  bankAccountName String?
+  walletNumber    String?
+
+  // ─── acceptance of platform terms, captured at submit time ───
+  acceptedTermsAt      DateTime?
+  acceptedTermsVersion String?
+
+  // ─── review ───
+  submittedAt      DateTime?
+  reviewedAt       DateTime?
+  reviewedById     String?
+  reviewedBy       User?     @relation("ApplicationReviewer", fields: [reviewedById], references: [id])
+  /// shown to the applicant verbatim — a rejection or change request must say
+  /// what to do next, not just that something was wrong.
+  decisionNote     String?
+  /// internal only; never serialised to the seller console.
+  reviewerNote     String?
+  /// which fields the reviewer asked about, so the wizard can highlight them
+  changesRequested Json?
+  submitCount      Int       @default(0)
+
+  /// set once, on approval
+  shopId String? @unique
+  shop   Shop?   @relation(fields: [shopId], references: [id])
+
+  documents ShopDocument[]
+  events    ShopApplicationEvent[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, submittedAt])
+  @@index([applicantId])
+}
+
+/// Append-only timeline for an application: every submit, review, decision and
+/// resubmit. This is what the admin queue renders as history and what an
+/// applicant sees as "what happened to my application".
+model ShopApplicationEvent {
+  id            String          @id @default(cuid())
+  applicationId String
+  application   ShopApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  /// "created" | "submitted" | "picked_up" | "changes_requested" | "resubmitted"
+  /// | "approved" | "rejected" | "withdrawn" | "document_reviewed"
+  type          String
+  /// visible to the applicant; keep it plain-language
+  message       String?
+  /// internal payload (field diffs, document ids, previous status)
+  meta          Json?
+  actorId       String?
+  actor         User?           @relation("ApplicationEventActor", fields: [actorId], references: [id])
+  createdAt     DateTime        @default(now())
+
+  @@index([applicationId, createdAt])
+}
+
+model ShopDocument {
+  id            String              @id @default(cuid())
+  applicationId String
+  application   ShopApplication     @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  kind          ShopDocumentKind
+  /// storage key resolved by the configured StorageProvider (local disk in dev,
+  /// object storage in production) — never a public URL.
+  storageKey    String
+  fileName      String?
+  mimeType      String?
+  sizeBytes     Int?
+  review        DocumentReviewState @default(PENDING)
+  reviewNote    String?
+  createdAt     DateTime            @default(now())
+
+  @@index([applicationId, kind])
+}
+
+model Category {
+  id           String            @id @default(cuid())
+  slug         String            @unique
+  en           String
+  np           String
+  icon         String // lucide icon name
+  hue          String // tailwind helper for the customer UI
+  sortOrder    Int               @default(0)
+  products     Product[]
+  shops        Shop[]
+  applications ShopApplication[]
+
+  @@index([sortOrder])
+}
+
+model Shop {
+  id          String     @id @default(cuid())
+  slug        String     @unique
+  name        String
+  nameNp      String?
+  description String?
+  categoryId  String?
+  category    Category?  @relation(fields: [categoryId], references: [id])
+  ownerId     String
+  owner       User       @relation("ShopOwner", fields: [ownerId], references: [id])
+  status      ShopStatus @default(PENDING)
+  verified    Boolean    @default(false)
+
+  // contact + location
+  phone            String?
+  area             String? // locality, e.g. "Baneshwor, Kathmandu"
+  fullAddress      String?
+  lat              Float?
+  lng              Float?
+  deliveryRadiusKm Float   @default(3)
+
+  // operations
+  hours                String? // human string, e.g. "7am – 9pm"
+  isOpen               Boolean @default(true)
+  minOrder             Int     @default(0)
+  soloMode             Boolean @default(false) // owner accepts AND delivers alone
+  codEnabled           Boolean @default(true)
+  onlinePaymentEnabled Boolean @default(false)
+
+  // presentation
+  coverImage String?
+  logoImage  String?
+  emoji      String? // fallback tile in the customer UI
+
+  // ratings (denormalised aggregates, recomputed on new review)
+  ratingAvg   Float @default(0)
+  ratingCount Int   @default(0)
+
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  approvedAt   DateTime?
+  /// Why GoPasal rejected or suspended this shop, in words the owner can act
+  /// on. Surfaced by the seller console (and by the RBAC refusal message), so
+  /// it must never contain internal notes — see ShopApplication.reviewerNote.
+  statusReason String?
+
+  products    Product[]
+  memberships ShopMembership[]
+  roles       Role[]
+  orders      Order[]
+  carts       Cart[]
+  riders      Rider[]
+  coupons     Coupon[]
+  reviews     Review[]
+  sponsored   SponsoredListing[]
+  zones       DeliveryZone[]
+  invites     StaffInvite[]
+  application ShopApplication?
+
+  @@index([status])
+  @@index([categoryId])
+}
+
+/// Optional custom polygon zones (beyond the simple radius). Stored as an
+/// ordered list of points; PostGIS polygon built in raw SQL when needed.
+model DeliveryZone {
+  id          String   @id @default(cuid())
+  shopId      String
+  shop        Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  name        String
+  polygon     Json // [{lat,lng}, ...]
+  feeOverride Int?
+  createdAt   DateTime @default(now())
+
+  @@index([shopId])
+}
+
+model Product {
+  id          String    @id @default(cuid())
+  shopId      String
+  shop        Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  name        String
+  nameNp      String?
+  description String?
+  categoryId  String?
+  category    Category? @relation(fields: [categoryId], references: [id])
+
+  // pricing when the product has no variants
+  price Int // paisa-free rupees (NPR integer)
+  mrp   Int?
+  unit  String @default("1 pc")
+
+  images   String[] @default([])
+  tags     String[] @default([])
+  isActive Boolean  @default(true)
+
+  // simple stock (used when no variants)
+  trackStock Boolean @default(false)
+  stock      Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  variants   ProductVariant[]
+  orderItems OrderItem[]
+  cartItems  CartItem[]
+  reviews    Review[]
+
+  @@index([categoryId])
+  @@index([isActive])
+  /// Three of the four inventory-health counts and the seller catalogue list all
+  /// filter on exactly this pair (`shopId = … AND isActive = true`), then add a
+  /// cheap predicate on `trackStock`/`stock`. Counting from the composite touches
+  /// only the shop's own rows instead of every active product on the platform.
+  /// It replaces the old single-column `shopId` index, which it covers as a
+  /// leftmost prefix.
+  @@index([shopId, isActive])
+}
+
+model ProductVariant {
+  id        String  @id @default(cuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  name      String // e.g. "1 kg", "500 g", "Large"
+  sku       String?
+  price     Int
+  mrp       Int?
+  stock     Int     @default(0)
+  isActive  Boolean @default(true)
+
+  orderItems OrderItem[]
+  cartItems  CartItem[]
+
+  @@index([productId])
+}
+
+// ═════════════════════════════════════ ADDRESSES ════════════════════════════
+
+model Address {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  label         String   @default("Home") // Home | Work | Other
+  recipientName String
+  phone         String
+  area          String
+  landmark      String?
+  fullAddress   String
+  lat           Float?
+  lng           Float?
+  isDefault     Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  orders Order[]
+
+  @@index([userId])
+}
+
+// ═════════════════════════════════════ CART ═════════════════════════════════
+// Server-side cart so it survives devices/refreshes. Single-store rule enforced
+// in service logic (adding from a different shop replaces the cart).
+
+model Cart {
+  id        String     @id @default(cuid())
+  userId    String     @unique
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// A cart holds goods from exactly one shop — adding from another empties it.
+  /// The relation is real (not a bare scalar) so the database enforces that the
+  /// shop exists, and so checkout can load the shop in the same query it loads
+  /// the items instead of guessing.
+  shopId    String?
+  shop      Shop?      @relation(fields: [shopId], references: [id], onDelete: SetNull)
+  items     CartItem[]
+  updatedAt DateTime   @updatedAt
+
+  @@index([shopId])
+}
+
+model CartItem {
+  id        String          @id @default(cuid())
+  cartId    String
+  cart      Cart            @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variantId String?
+  variant   ProductVariant? @relation(fields: [variantId], references: [id])
+  qty       Int             @default(1)
+
+  /// Note for anyone touching CartService: Postgres treats NULLs as distinct, so
+  /// this constraint does NOT dedupe rows where variantId is null. CartService
+  /// therefore resolves the existing row itself rather than relying on an upsert
+  /// against this key — see the comment there.
+  @@unique([cartId, productId, variantId])
+  @@index([cartId])
+}
+
+// ═════════════════════════════════════ ORDERS ═══════════════════════════════
+
+enum OrderStatus {
+  PLACED
+  ACCEPTED
+  PACKED
+  OUT_FOR_DELIVERY
+  DELIVERED
+  CANCELLED
+  REJECTED
+}
+
+enum PaymentMethod {
+  COD
+  ESEWA
+  KHALTI
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+model Order {
+  id         String @id @default(cuid())
+  code       String @unique // human code, e.g. GP-482913
+  customerId String
+  customer   User   @relation("CustomerOrders", fields: [customerId], references: [id])
+  shopId     String
+  shop       Shop   @relation(fields: [shopId], references: [id])
+
+  status OrderStatus @default(PLACED)
+
+  // address snapshot (order is immutable to later address edits)
+  addressId      String?
+  address        Address? @relation(fields: [addressId], references: [id])
+  recipientName  String
+  recipientPhone String
+  area           String
+  landmark       String?
+  fullAddress    String
+  lat            Float?
+  lng            Float?
+
+  // money (NPR integers)
+  subtotal    Int
+  deliveryFee Int @default(0)
+  discount    Int @default(0)
+  total       Int
+
+  paymentMethod PaymentMethod @default(COD)
+  paymentStatus PaymentStatus @default(PENDING)
+
+  couponId String?
+  coupon   Coupon? @relation(fields: [couponId], references: [id])
+
+  note String?
+
+  placedAt     DateTime  @default(now())
+  acceptedAt   DateTime?
+  packedAt     DateTime?
+  dispatchedAt DateTime?
+  deliveredAt  DateTime?
+  cancelledAt  DateTime?
+  cancelReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items        OrderItem[]
+  events       OrderEvent[]
+  delivery     Delivery?
+  review       Review?
+  dispute      Dispute?
+  redemption   CouponRedemption?
+  groupOrder   GroupOrder?       @relation(fields: [groupOrderId], references: [id])
+  groupOrderId String?
+
+  @@index([customerId])
+  @@index([status])
+  /// Every seller-side read of this table starts from one shop and a date range:
+  /// the analytics window (`shopId in […] AND placedAt >= … AND placedAt < …`), the
+  /// previous-window `groupBy`, and the paged seller queue ordered newest-first.
+  /// Postgres can satisfy all three from this one index — equality on the leading
+  /// column, then a range on the second — and the range also supplies the sort
+  /// order, so the queue pages without a sort step. It replaces the old
+  /// single-column `shopId` index, which this one covers as a leftmost prefix.
+  @@index([shopId, placedAt])
+  /// The open-orders snapshot counts one shop's live statuses
+  /// (`shopId in […] AND status in (PLACED, ACCEPTED, PACKED, OUT_FOR_DELIVERY)`)
+  /// and the queue filters the same pair. The single-column `status` index cannot
+  /// serve that: `PLACED` across the whole platform is a huge bucket that then has
+  /// to be filtered down to one shop. `@@index([status])` stays for the
+  /// platform-wide admin counts, which have no shop to anchor on.
+  @@index([shopId, status])
+}
+
+model OrderItem {
+  id           String          @id @default(cuid())
+  orderId      String
+  order        Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId    String?
+  product      Product?        @relation(fields: [productId], references: [id])
+  variantId    String?
+  variant      ProductVariant? @relation(fields: [variantId], references: [id])
+  nameSnapshot String
+  unitSnapshot String?
+  price        Int
+  qty          Int
+
+  @@index([orderId])
+  /// Top-products aggregation groups a window's delivered lines by product, and
+  /// the review guard asks whether a given product was in a given order. `productId`
+  /// is nullable (a deleted product leaves the line behind with its name snapshot),
+  /// and Postgres b-trees do index NULLs, so those rows stay reachable.
+  @@index([productId])
+}
+
+/// Append-only status history for an order (who moved it, when, note).
+model OrderEvent {
+  id        String      @id @default(cuid())
+  orderId   String
+  order     Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  status    OrderStatus
+  note      String?
+  actorId   String?
+  createdAt DateTime    @default(now())
+
+  @@index([orderId])
+}
+
+// ═════════════════════════════════════ DELIVERY ═════════════════════════════
+
+enum DeliveryStatus {
+  UNASSIGNED
+  ASSIGNED
+  PICKED_UP
+  EN_ROUTE
+  DELIVERED
+  FAILED
+}
+
+enum RiderStatus {
+  OFFLINE
+  ONLINE // available, not on a delivery
+  ON_DELIVERY
+}
+
+enum VehicleType {
+  BICYCLE
+  MOTORBIKE
+  SCOOTER
+  WALK
+  VAN
+}
+
+/// A rider belongs to a shop (self-delivery Model 4A). Platform-managed riders
+/// (Model 4B) slot in later by making shopId nullable + a platform pool.
+model Rider {
+  id          String      @id @default(cuid())
+  userId      String      @unique
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shopId      String?
+  shop        Shop?       @relation(fields: [shopId], references: [id])
+  vehicleType VehicleType @default(MOTORBIKE)
+  status      RiderStatus @default(OFFLINE)
+
+  // last known location (latest ping only; history is optional/low-value)
+  lat        Float?
+  lng        Float?
+  heading    Float? // degrees, for marker rotation
+  speed      Float? // m/s
+  accuracy   Float? // metres
+  lastPingAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  deliveries Delivery[]
+
+  @@index([shopId])
+  @@index([status])
+}
+
+model Delivery {
+  id      String         @id @default(cuid())
+  orderId String         @unique
+  order   Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  riderId String?
+  rider   Rider?         @relation(fields: [riderId], references: [id])
+  status  DeliveryStatus @default(UNASSIGNED)
+
+  // snapshot of the destination for routing
+  destLat Float?
+  destLng Float?
+
+  distanceMeters Int?
+  assignedAt     DateTime?
+  pickedUpAt     DateTime?
+  deliveredAt    DateTime?
+  failedAt       DateTime?
+  failReason     String?
+
+  // proof of delivery + COD settlement (done from seller/rider app)
+  podNote      String?
+  podImageUrl  String?
+  codCollected Boolean @default(false)
+  codAmount    Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([riderId])
+  @@index([status])
+}
+
+// ═════════════════════════════════════ PAYMENTS ═════════════════════════════
+
+model PaymentIntent {
+  id         String        @id @default(cuid())
+  orderId    String        @unique
+  provider   PaymentMethod
+  status     PaymentStatus @default(PENDING)
+  amount     Int
+  reference  String? // provider transaction id
+  rawPayload Json?
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+}
+
+// ═════════════════════════════════════ COUPONS / PROMOS ═════════════════════
+
+enum CouponType {
+  PERCENT
+  FLAT
+}
+
+model Coupon {
+  id           String     @id @default(cuid())
+  code         String     @unique
+  /// null = platform-wide, else scoped to a shop.
+  shopId       String?
+  shop         Shop?      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  type         CouponType
+  value        Int // percent (0-100) or flat NPR
+  minOrder     Int        @default(0)
+  maxDiscount  Int? // cap for percent coupons
+  usageLimit   Int? // total redemptions allowed
+  perUserLimit Int        @default(1)
+  usedCount    Int        @default(0)
+  validFrom    DateTime   @default(now())
+  validTo      DateTime?
+  isActive     Boolean    @default(true)
+  createdAt    DateTime   @default(now())
+
+  orders      Order[]
+  redemptions CouponRedemption[]
+
+  @@index([shopId, createdAt])
+}
+
+model CouponRedemption {
+  id        String   @id @default(cuid())
+  couponId  String
+  coupon    Coupon   @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  orderId   String   @unique
+  order     Order    @relation(fields: [orderId], references: [id])
+  amount    Int
+  createdAt DateTime @default(now())
+
+  @@unique([couponId, userId, orderId])
+  @@index([userId])
+}
+
+model SponsoredListing {
+  id        String    @id @default(cuid())
+  shopId    String
+  shop      Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  placement String    @default("home") // home | category | search
+  priority  Int       @default(0)
+  startsAt  DateTime  @default(now())
+  endsAt    DateTime?
+  isActive  Boolean   @default(true)
+
+  @@index([placement])
+}
+
+// ═════════════════════════════════════ REVIEWS ══════════════════════════════
+
+model Review {
+  id          String   @id @default(cuid())
+  orderId     String?  @unique
+  order       Order?   @relation(fields: [orderId], references: [id])
+  shopId      String
+  shop        Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  productId   String?
+  product     Product? @relation(fields: [productId], references: [id])
+  customerId  String
+  customer    User     @relation(fields: [customerId], references: [id])
+  rating      Int // 1..5
+  comment     String?
+  sellerReply String?
+  createdAt   DateTime @default(now())
+
+  @@index([shopId, createdAt])
+  @@index([productId])
+}
+
+// ═════════════════════════════════════ NOTIFICATIONS ════════════════════════
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String // order.accepted, order.out_for_delivery, promo, system...
+  title     String
+  body      String
+  data      Json?
+  channel   String    @default("inapp") // inapp | sms | push
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, readAt])
+  // Serves NotificationsService.listMine, which is `where { userId }` ordered by
+  // createdAt desc with `take: 100`. The [userId, readAt] index above finds the
+  // user's rows but cannot supply that order, so Postgres had to top-N sort every
+  // notification the user had ever received on each bell open. Kept separate rather
+  // than widened because the unread badge is a pure count on [userId, readAt].
+  @@index([userId, createdAt])
+}
+
+// ═════════════════════════════════════ SUPPORT / DISPUTES ═══════════════════
+
+enum TicketStatus {
+  OPEN
+  PENDING
+  RESOLVED
+  CLOSED
+}
+
+enum TicketPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+model SupportTicket {
+  id        String         @id @default(cuid())
+  code      String         @unique
+  userId    String
+  user      User           @relation("TicketOwner", fields: [userId], references: [id])
+  orderId   String?
+  subject   String
+  category  String         @default("general")
+  status    TicketStatus   @default(OPEN)
+  priority  TicketPriority @default(NORMAL)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  messages TicketMessage[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+model TicketMessage {
+  id          String        @id @default(cuid())
+  ticketId    String
+  ticket      SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  authorId    String
+  author      User          @relation(fields: [authorId], references: [id])
+  body        String
+  attachments String[]      @default([])
+  isStaff     Boolean       @default(false)
+  createdAt   DateTime      @default(now())
+
+  @@index([ticketId])
+}
+
+enum DisputeStatus {
+  OPEN
+  UNDER_REVIEW
+  RESOLVED_CUSTOMER
+  RESOLVED_SHOP
+  REJECTED
+}
+
+model Dispute {
+  id           String        @id @default(cuid())
+  orderId      String        @unique
+  order        Order         @relation(fields: [orderId], references: [id])
+  raisedById   String
+  reason       String
+  detail       String?
+  status       DisputeStatus @default(OPEN)
+  resolution   String?
+  resolvedById String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@index([status])
+}
+
+// ═════════════════════════════════════ LOYALTY / REFERRALS / GOLD ═══════════
+
+model LoyaltyAccount {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  points    Int      @default(0)
+  tier      String   @default("Bronze")
+  updatedAt DateTime @updatedAt
+}
+
+model LoyaltyTransaction {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  delta     Int
+  reason    String
+  orderId   String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+enum ReferralStatus {
+  PENDING
+  COMPLETED
+  REWARDED
+}
+
+model Referral {
+  id            String         @id @default(cuid())
+  referrerId    String
+  referrer      User           @relation("Referrer", fields: [referrerId], references: [id])
+  refereeId     String?        @unique
+  referee       User?          @relation("Referee", fields: [refereeId], references: [id])
+  code          String         @unique
+  status        ReferralStatus @default(PENDING)
+  rewardGranted Boolean        @default(false)
+  createdAt     DateTime       @default(now())
+
+  @@index([referrerId])
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELLED
+  EXPIRED
+}
+
+/// GoPasal Gold membership.
+model Subscription {
+  id          String             @id @default(cuid())
+  userId      String             @unique
+  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan        String             @default("gold")
+  status      SubscriptionStatus @default(ACTIVE)
+  startedAt   DateTime           @default(now())
+  renewsAt    DateTime?
+  cancelledAt DateTime?
+}
+
+// ═════════════════════════════════════ GROUP ORDERS ═════════════════════════
+
+enum GroupOrderStatus {
+  OPEN
+  LOCKED
+  PLACED
+  CANCELLED
+}
+
+model GroupOrder {
+  id        String           @id @default(cuid())
+  code      String           @unique
+  hostId    String
+  host      User             @relation("GroupHost", fields: [hostId], references: [id])
+  shopId    String
+  status    GroupOrderStatus @default(OPEN)
+  expiresAt DateTime?
+  createdAt DateTime         @default(now())
+
+  participants GroupOrderParticipant[]
+  orders       Order[]
+}
+
+model GroupOrderParticipant {
+  id           String     @id @default(cuid())
+  groupOrderId String
+  groupOrder   GroupOrder @relation(fields: [groupOrderId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User       @relation(fields: [userId], references: [id])
+  items        Json // draft line items before the host places the combined order
+  joinedAt     DateTime   @default(now())
+
+  @@unique([groupOrderId, userId])
+}
+
+// ═════════════════════════════════════ POLICY VERSIONING ════════════════════
+
+model PolicyDocument {
+  id          String    @id @default(cuid())
+  key         String // terms | privacy | refund | delivery | cookies
+  version     String
+  title       String
+  content     String
+  isPublished Boolean   @default(false)
+  effectiveAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  acceptances PolicyAcceptance[]
+
+  @@unique([key, version])
+}
+
+model PolicyAcceptance {
+  id         String         @id @default(cuid())
+  userId     String
+  user       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  policyId   String
+  policy     PolicyDocument @relation(fields: [policyId], references: [id])
+  version    String
+  acceptedAt DateTime       @default(now())
+
+  @@unique([userId, policyId])
+}
+
+// ═════════════════════════════════════ FRAUD + AUDIT ════════════════════════
+
+enum FraudStatus {
+  OPEN
+  REVIEWING
+  CONFIRMED
+  DISMISSED
+}
+
+model FraudFlag {
+  id          String      @id @default(cuid())
+  subjectType String // user | shop | order
+  subjectId   String
+  reason      String
+  severity    String      @default("medium") // low | medium | high
+  status      FraudStatus @default(OPEN)
+  reporterId  String?
+  reporter    User?       @relation("FraudReporter", fields: [reporterId], references: [id])
+  createdAt   DateTime    @default(now())
+
+  @@index([subjectType, subjectId])
+  @@index([status])
+}
+
+/// Tamper-evident action log for compliance. Written by an interceptor on
+/// sensitive mutations across all surfaces.
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  actor      User?    @relation(fields: [actorId], references: [id])
+  action     String // e.g. "order.accept", "role.update", "shop.approve"
+  entityType String
+  entityId   String?
+  surface    String   @default("api")
+  before     Json?
+  after      Json?
+  ip         String?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([actorId])
+  @@index([createdAt])
+}

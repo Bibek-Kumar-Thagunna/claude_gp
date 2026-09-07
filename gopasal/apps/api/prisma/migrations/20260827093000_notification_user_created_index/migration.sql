@@ -1,0 +1,33 @@
+-- The notification feed's sort order.
+--
+-- Serves: NotificationsService.listMine
+--           notification.findMany({ where: { userId },
+--                                   orderBy: { createdAt: 'desc' },
+--                                   take: 100 })
+--         which is what the seller console's bell panel and the customer app's
+--         notification list both call.
+--
+-- Benefit: removes a sort. "Notification_userId_readAt_idx" can find one user's
+--          rows, but its second column is readAt, so it cannot deliver them in
+--          createdAt order — Postgres had to fetch every notification the user had
+--          ever received and top-N sort it to answer for the newest 100. Unlike a
+--          shop's staff list, this table grows with trade: a row is written for each
+--          order transition, each dispute update and each promotion, and nothing
+--          prunes read notifications. A long-standing account therefore pays a
+--          sort proportional to its whole history every time it opens the bell.
+--          With this index the read is an index scan that stops after 100 rows.
+--
+-- Why not widen the existing index instead: ("userId", "readAt", "createdAt") would
+-- serve the unread-only variant, but for the default read (no readAt predicate)
+-- createdAt is not a usable sort key with readAt unconstrained in front of it, so
+-- the sort would remain. The unread badge — notification.count({ where: { userId,
+-- readAt: null } }) — is a count with no order at all and is already answered from
+-- ("userId", "readAt"). Two narrow indexes each serve one query fully; one wide one
+-- would serve neither.
+--
+-- Not added: an index for `listMine(userId, unreadOnly = true)`, which is
+-- `where { userId, readAt: null }` with the same order. ("userId", "readAt")
+-- narrows that to the unread set, which is small by construction — a user reads or
+-- ignores notifications, and an unread pile large enough for its sort to matter is
+-- a product problem, not an index problem.
+CREATE INDEX "Notification_userId_createdAt_idx" ON "Notification"("userId", "createdAt");
