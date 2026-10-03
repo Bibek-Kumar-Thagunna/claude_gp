@@ -1080,11 +1080,12 @@ function ShareOnceDialog({
         onClick={onClose}
         aria-hidden
       />
+      <div className="pointer-events-none fixed inset-0 z-[60] grid place-items-center p-4">
       <motion.div
         role="dialog"
         aria-modal="true"
         aria-label="Invitation created"
-        className="fixed left-1/2 top-1/2 z-[60] w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-white p-6 shadow-2xl"
+        className="gp-scroll pointer-events-auto max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"
         initial={{ opacity: 0, scale: 0.96 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.96 }}
@@ -1173,7 +1174,7 @@ function ShareOnceDialog({
           <Button onClick={onClose}>Done</Button>
         </div>
       </motion.div>
+      </div>
     </>
   );
 }
-

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { BadRequestException, type ArgumentMetadata } from '@nestjs/common';
-import { OrderStatus } from '@prisma/client';
+import { OrderStatus, PaymentMethod } from '@prisma/client';
 import { RequestValidationPipe } from '../pipes/request-validation.pipe';
 import {
   AdjustStockDto,
@@ -12,6 +12,7 @@ import {
   PRODUCT_TAG_LIMIT,
   PRODUCT_TAG_MAX_LENGTH,
   PRODUCT_UNIT_MAX_LENGTH,
+  ImportProductsQueryDto,
   ReorderProductImagesDto,
   SHOP_MIN_ORDER_MAX,
   UpdateProductDto,
@@ -26,7 +27,12 @@ import {
   FAIL_REASON_MAX_LENGTH,
   POD_NOTE_MAX_LENGTH,
 } from '../../modules/delivery/dto/delivery.dto';
-import { ListShopOrdersQueryDto, RejectOrderDto } from '../../modules/orders/dto/orders.dto';
+import {
+  CancelOrderDto,
+  CheckoutDto,
+  ListShopOrdersQueryDto,
+  RejectOrderDto,
+} from '../../modules/orders/dto/orders.dto';
 import { ListShopCouponsQueryDto } from '../../modules/coupons/dto/coupons.dto';
 import { ListShopReviewsQueryDto } from '../../modules/reviews/dto/reviews.dto';
 import {
@@ -42,6 +48,11 @@ import {
 } from '../../modules/users/dto/users.dto';
 import { CreateRoleDto, UpdateRoleDto } from '../../rbac/dto/rbac.dto';
 import { PaginationDto, SEARCH_MAX_LENGTH } from './pagination.dto';
+import { ApplicationFieldsDto } from '../../modules/onboarding/dto/onboarding.dto';
+import {
+  CreateLocationCaptureDto,
+  SubmitCapturedLocationDto,
+} from '../../modules/location-capture/dto/location-capture.dto';
 
 /**
  * The wall every request has to clear, exercised with the pipe `main.ts` actually
@@ -170,6 +181,21 @@ describe('the bypass itself', () => {
     const out = await pipe.transform(hostile, meta(Object));
 
     assert.deepEqual(out, hostile, 'the pipe returned the hostile body untouched — as it always did');
+  });
+});
+
+describe('checkout payment boundary', () => {
+  const addressId = 'address_1';
+
+  it('accepts only customer-facing payment methods', async () => {
+    for (const paymentMethod of [PaymentMethod.COD, PaymentMethod.ESEWA, PaymentMethod.KHALTI]) {
+      const dto = await accept<CheckoutDto>({ addressId, paymentMethod }, CheckoutDto);
+      assert.equal(dto.paymentMethod, paymentMethod);
+    }
+  });
+
+  it('rejects the retired development payment enum even if submitted directly', async () => {
+    names(await reject({ addressId, paymentMethod: PaymentMethod.DEVELOPMENT }, CheckoutDto), 'paymentMethod');
   });
 });
 
@@ -404,6 +430,20 @@ describe('reject-order reason', () => {
 
   it('is length-capped', async () => {
     names(await reject({ reason: 'x'.repeat(281) }, RejectOrderDto), 'reason');
+  });
+
+  it('refuses a blank or vague one-character reason', async () => {
+    names(await reject({ reason: 'x' }, RejectOrderDto), 'reason');
+  });
+});
+
+describe('cancel-order reason', () => {
+  it('is required for both customer and seller cancellation routes', async () => {
+    names(await reject({}, CancelOrderDto), 'reason');
+  });
+
+  it('must explain the cancellation', async () => {
+    names(await reject({ reason: 'x' }, CancelOrderDto), 'reason');
   });
 });
 
@@ -725,6 +765,7 @@ describe('client-supplied storage paths · the two bodies that used to accept on
       await reject({ status: 'FAILED', failReason: 'x'.repeat(FAIL_REASON_MAX_LENGTH + 1) }, DeliveryStatusDto),
       'failReason',
     );
+    names(await reject({ status: 'FAILED', failReason: '  ' }, DeliveryStatusDto), 'failReason');
   });
 
   it('refuses logoImage and coverImage on shop settings, which never accepted them', async () => {
@@ -780,10 +821,8 @@ describe('photo reorder body · keys, bounded, and nothing else', () => {
  *  1. `{"name": null}` was **accepted**. `@IsOptional()` skips every validator when
  *     the value is `null`, so `data: { name: null }` reached
  *     `prisma.shop.update` for a non-nullable column and came back as a 500.
- *  2. `{"lat": "27.7"}` was **accepted as a string**. `isLatitude` takes "a
- *     latitude string or number", body coercion is off by design, and `Shop.lat`
- *     is a `Float?` — so again a 500 from the driver rather than a 400 from the
- *     pipe.
+ *  2. Coordinates were ordinary writable fields. They are now refused entirely;
+ *     only a fresh, time-limited phone capture can replace the shop pin.
  *  3. `{"name": ""}` was **accepted**, for the name a storefront is listed under.
  *     `ApplicationFieldsDto` — which created this very column — has
  *     `@MinLength(2)`, so the update path was the looser of the two.
@@ -811,8 +850,6 @@ describe('shop settings PATCH · partial, bounded, and null-free', () => {
         phone: '9800000000',
         area: 'Baneshwor, Kathmandu',
         fullAddress: 'Ward 10, New Baneshwor',
-        lat: 27.6915,
-        lng: 85.3419,
         deliveryRadiusKm: 2.5,
         emoji: '🏪',
         hours: '7am – 9pm',
@@ -828,7 +865,6 @@ describe('shop settings PATCH · partial, bounded, and null-free', () => {
     assert.equal(dto.minOrder, 300);
     assert.equal(dto.isOpen, true);
     assert.equal(dto.soloMode, false);
-    assert.equal(dto.lat, 27.6915);
   });
 
   it('refuses null on a non-nullable column — the 500 this DTO used to produce', async () => {
@@ -847,6 +883,11 @@ describe('shop settings PATCH · partial, bounded, and null-free', () => {
     names(await reject({ categoryId: null }, UpdateShopDto), 'categoryId');
     names(await reject({ lat: null }, UpdateShopDto), 'lat');
     names(await reject({ lng: null }, UpdateShopDto), 'lng');
+  });
+
+  it('refuses hand-typed coordinates because the phone capture owns the shop pin', async () => {
+    names(await reject({ lat: 27.6915 }, UpdateShopDto), 'lat');
+    names(await reject({ lng: 85.3419 }, UpdateShopDto), 'lng');
   });
 
   it('clears a nullable text column with an empty string', async () => {
@@ -921,6 +962,56 @@ describe('shop settings PATCH · partial, bounded, and null-free', () => {
     // missing; on this route the param is always present, and the whitelist means
     // a body copy cannot even be sent.
     names(await reject({ shopId: 'shop_other', name: 'Fine name' }, UpdateShopDto), 'shopId');
+  });
+});
+
+describe('shop location capture · phone-derived input only', () => {
+  it('lets an applicant pin the shop they are standing in', async () => {
+    // This used to be refused on both seller forms, and the application form
+    // was the wrong half of that rule: the applicant is in the shop holding a
+    // GPS, and without a pin the approved shop stays invisible behind
+    // `VERIFIED_LOCATION`. The bounds are the supervised capture's, to the
+    // metre, so a coordinate means the same thing whichever door it came in.
+    const dto = await accept<ApplicationFieldsDto>(
+      { lat: 27.7, lng: 85.3, locationAccuracyM: 12 },
+      ApplicationFieldsDto,
+    );
+    assert.equal(dto.lat, 27.7);
+    assert.equal(dto.locationAccuracyM, 12);
+  });
+
+  it('still refuses coordinates on an approved shop’s own settings form', async () => {
+    // An approved shop moving itself on the map is the supervised capture's
+    // business, not a field on the settings page.
+    names(await reject({ lat: 27.7 }, UpdateShopDto), 'lat');
+    names(await reject({ lng: 85.3 }, UpdateShopDto), 'lng');
+  });
+
+  it('will not let an applicant claim how their coordinate was obtained', async () => {
+    // `locationCaptureMethod` is the server's account of provenance. A client
+    // that could set it could claim a supervised capture it never had, which
+    // is the entire value a reviewer takes from the field.
+    names(await reject({ locationCaptureMethod: 'HANDOFF' }, ApplicationFieldsDto), 'locationCaptureMethod');
+    names(await reject({ locationCapturedAt: '2020-01-01T00:00:00.000Z' }, ApplicationFieldsDto), 'locationCapturedAt');
+  });
+
+  it('accepts only an explicit direct-or-handoff mode', async () => {
+    const dto = await accept<CreateLocationCaptureDto>({ mode: 'HANDOFF' }, CreateLocationCaptureDto);
+    assert.equal(dto.mode, 'HANDOFF');
+    names(await reject({ mode: 'MANUAL' }, CreateLocationCaptureDto), 'mode');
+  });
+
+  it('requires a fresh-position shape with 100 metre accuracy or better', async () => {
+    const valid = {
+      lat: 27.7,
+      lng: 85.3,
+      accuracyM: 12,
+      capturedAt: '2026-09-09T10:00:00.000Z',
+    };
+    const dto = await accept<SubmitCapturedLocationDto>(valid, SubmitCapturedLocationDto);
+    assert.equal(dto.accuracyM, 12);
+    names(await reject({ ...valid, accuracyM: 101 }, SubmitCapturedLocationDto), 'accuracyM');
+    names(await reject({ ...valid, lat: 120 }, SubmitCapturedLocationDto), 'lat');
   });
 });
 
@@ -1404,5 +1495,37 @@ describe('address PATCH · inherits the bounds it used to drop', () => {
 
   it('refuses a key the body does not declare', async () => {
     names(await reject({ userId: 'other-user' }, UpdateAddressDto), 'userId');
+  });
+});
+
+/**
+ * The catalogue import flag, which decides whether a whole shelf gets rewritten.
+ *
+ * It is a word rather than a boolean for one reason, asserted here so nobody
+ * "tidies" it back: query strings are validated with `enableImplicitConversion`
+ * on, and a property reflected as `boolean` is converted with `!!value` — so an
+ * honest `?apply=false` from a client that means "just check" would arrive as
+ * `true` and write. This was not hypothetical; the route shipped that way for an
+ * afternoon and the dry run applied.
+ */
+describe('catalogue import mode', () => {
+  it('defaults to checking when the parameter is absent', async () => {
+    const dto = await accept<ImportProductsQueryDto>({}, ImportProductsQueryDto, 'query');
+    assert.equal(dto.mode, undefined);
+    assert.notEqual(dto.mode, 'apply', 'absent must never mean apply');
+  });
+
+  it('carries the two words through unchanged', async () => {
+    for (const mode of ['check', 'apply'] as const) {
+      const dto = await accept<ImportProductsQueryDto>({ mode }, ImportProductsQueryDto, 'query');
+      assert.equal(dto.mode, mode);
+    }
+  });
+
+  it('refuses anything else rather than guessing', async () => {
+    await assert.rejects(
+      () => accept({ mode: 'true' }, ImportProductsQueryDto, 'query'),
+      BadRequestException,
+    );
   });
 });

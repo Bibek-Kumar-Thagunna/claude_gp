@@ -1,0 +1,72 @@
+# ClamD must remain internal: its TCP protocol has no authentication or TLS.
+# The persistent volume keeps downloaded signature databases across restarts.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: clamav
+spec:
+  serviceName: clamav
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: clamav
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: clamav
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: clamav
+          image: clamav/clamav:1.4.6
+          ports:
+            - name: clamd
+              containerPort: 3310
+          startupProbe:
+            tcpSocket:
+              port: clamd
+            failureThreshold: 60
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket:
+              port: clamd
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 500m
+              memory: 2Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            # The official entrypoint starts as root, chowns the signature volume,
+            # then runs clamd/freshclam as the clamav user. Dropping CAP_CHOWN or
+            # forcing a non-root UID here would break that initialization.
+          volumeMounts:
+            - name: signatures
+              mountPath: /var/lib/clamav
+      volumeClaimTemplates:
+        - metadata:
+            name: signatures
+          spec:
+            accessModes: [ReadWriteOnce]
+            resources:
+              requests:
+                storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: clamav
+spec:
+  selector:
+    app.kubernetes.io/name: clamav
+  ports:
+    - name: clamd
+      port: 3310
+      targetPort: clamd

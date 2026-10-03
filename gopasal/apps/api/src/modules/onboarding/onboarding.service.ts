@@ -35,6 +35,7 @@ import {
   isOpen,
   missingDocuments,
   missingForSubmit,
+  unverifiedDocuments,
   type ApplicationAction,
 } from './application-state';
 import { toDocumentView } from './document-view';
@@ -122,6 +123,9 @@ interface WritableApplicationData {
   fullAddress?: string | null;
   lat?: number | null;
   lng?: number | null;
+  locationAccuracyM?: number | null;
+  locationCapturedAt?: Date | null;
+  locationCaptureMethod?: string | null;
   deliveryRadiusKm?: number;
   hours?: string | null;
   soloMode?: boolean;
@@ -177,6 +181,47 @@ function blankToNull(value: string | undefined): string | null | undefined {
   return trimmed === '' ? null : trimmed;
 }
 
+/** How a coordinate on an application got there. The server's word, never the client's. */
+const SELF_REPORTED = 'SELF_REPORTED';
+
+/**
+ * The location columns, all together or not at all.
+ *
+ * Three columns describe one fact, so they move as one. An applicant who has
+ * not reached the map yet sends none of them and this writes nothing — which
+ * matters because the draft autosaves on every keystroke, and a per-field
+ * mapping would blank a pin the moment somebody edited their shop's name.
+ */
+function locationFields(dto: ApplicationFieldsDto): Partial<WritableApplicationData> {
+  const { lat, lng, locationAccuracyM } = dto;
+  if (lat === undefined && lng === undefined && locationAccuracyM === undefined) return {};
+
+  // An explicit null clears the pin. Anything short of a complete pin is a
+  // mistake worth refusing rather than a half-set of columns to store.
+  if (lat === null || lng === null) {
+    return {
+      lat: null,
+      lng: null,
+      locationAccuracyM: null,
+      locationCapturedAt: null,
+      locationCaptureMethod: null,
+    };
+  }
+  if (lat === undefined || lng === undefined || locationAccuracyM === undefined) {
+    throw new BadRequestException(
+      'A shop pin needs lat, lng and locationAccuracyM together.',
+    );
+  }
+
+  return {
+    lat,
+    lng,
+    locationAccuracyM,
+    locationCapturedAt: new Date(),
+    locationCaptureMethod: SELF_REPORTED,
+  };
+}
+
 /**
  * DTO → column payload. The mapping is written out field by field on purpose:
  * this function is the only door between request input and the row, so it should
@@ -193,8 +238,22 @@ function writableFields(dto: ApplicationFieldsDto): WritableApplicationData {
     contactEmail: blankToNull(dto.contactEmail),
     area: blankToNull(dto.area),
     fullAddress: blankToNull(dto.fullAddress),
-    lat: dto.lat,
-    lng: dto.lng,
+    /*
+      The pin, and the three columns that make it reviewable.
+
+      Written as a unit: a coordinate without its accuracy is a number a
+      reviewer cannot judge, and one without a timestamp cannot be told from a
+      reading taken somewhere else last week. So a partial pin writes nothing,
+      and clearing the latitude clears the evidence with it rather than leaving
+      an accuracy figure describing a coordinate that is gone.
+
+      `locationCaptureMethod` is the server's word, not the applicant's. It says
+      SELF_REPORTED here because that is exactly what this is — a pin the
+      applicant took themselves, trustworthy enough to review and put a shop on
+      a map, and not the same thing as the supervised HANDOFF capture. A
+      reviewer reading the two must be able to tell them apart.
+    */
+    ...locationFields(dto),
     deliveryRadiusKm: dto.deliveryRadiusKm,
     hours: blankToNull(dto.hours),
     soloMode: dto.soloMode,
@@ -442,7 +501,18 @@ export class OnboardingService {
       select: { kind: true, review: true },
       orderBy: { createdAt: 'asc' },
     });
-    const missingDocs = missingDocuments({ payoutMethod: app.payoutMethod, documents: attached });
+    const category = app.categoryId
+      ? await this.prisma.category.findUnique({
+          where: { id: app.categoryId },
+          select: { slug: true },
+        })
+      : null;
+    const missingDocs = missingDocuments({
+      payoutMethod: app.payoutMethod,
+      vatNo: app.vatNo,
+      category,
+      documents: attached,
+    });
 
     if (missing.length > 0 || missingDocs.length > 0) {
       throw new BadRequestException({
@@ -759,21 +829,29 @@ export class OnboardingService {
       });
     }
 
-    // The same document floor as submission, checked again here because this is
-    // the last gate before a shop exists and starts taking money. It is not
-    // redundant with the submit check: a reviewer can reject one document and
-    // leave the application SUBMITTED, and approving it in that state would
-    // create a shop whose citizenship scan the reviewer had just called unusable.
-    // The remedy is `request-changes`, which is why this refuses rather than warns.
+    // Approval is stricter than submission: every required paper must have an
+    // explicit ACCEPTED decision. A pending upload may enter the queue so a
+    // reviewer can inspect it, but it may never create a trading shop.
     const attached = await this.prisma.shopDocument.findMany({
       where: { applicationId },
       select: { kind: true, review: true },
     });
-    const missingDocs = missingDocuments({ payoutMethod: app.payoutMethod, documents: attached });
+    const category = app.categoryId
+      ? await this.prisma.category.findUnique({
+          where: { id: app.categoryId },
+          select: { slug: true },
+        })
+      : null;
+    const missingDocs = unverifiedDocuments({
+      payoutMethod: app.payoutMethod,
+      vatNo: app.vatNo,
+      category,
+      documents: attached,
+    });
     if (missingDocs.length > 0) {
       throw new BadRequestException({
         message:
-          'This application cannot be approved until the required documents are attached and not rejected. ' +
+          'This application cannot be approved until every required document is attached and accepted. ' +
           'Use "request changes" to ask the applicant for them.',
         missingDocuments: missingDocs,
       });
@@ -846,6 +924,9 @@ export class OnboardingService {
               fullAddress: app.fullAddress ?? undefined,
               lat: app.lat ?? undefined,
               lng: app.lng ?? undefined,
+              locationAccuracyM: app.locationAccuracyM ?? undefined,
+              locationCapturedAt: app.locationCapturedAt ?? undefined,
+              locationCaptureMethod: app.locationCaptureMethod ?? undefined,
               deliveryRadiusKm: app.deliveryRadiusKm,
               hours: app.hours ?? undefined,
               soloMode: app.soloMode,
@@ -949,6 +1030,9 @@ export class OnboardingService {
       fullAddress: app.fullAddress,
       lat: app.lat,
       lng: app.lng,
+      locationAccuracyM: app.locationAccuracyM,
+      locationCapturedAt: app.locationCapturedAt,
+      locationCaptureMethod: app.locationCaptureMethod,
       deliveryRadiusKm: app.deliveryRadiusKm,
       hours: app.hours,
       soloMode: app.soloMode,
@@ -1040,6 +1124,8 @@ export class OnboardingService {
       isOpen: isOpen(app.status),
       missing: missingForSubmit(app),
       missingDocuments: missingDocuments(app),
+      /** Approval gate: required papers that have not been explicitly accepted. */
+      approvalMissingDocuments: unverifiedDocuments(app),
       applicant: {
         id: app.applicant.id,
         name: app.applicant.name,

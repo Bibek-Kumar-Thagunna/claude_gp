@@ -1,0 +1,4 @@
+ALTER TYPE "DataErasureStatus" ADD VALUE 'PURGING';
+
+ALTER TABLE "DataErasureRequest"
+ADD COLUMN "proofKeys" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];

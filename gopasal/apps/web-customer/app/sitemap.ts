@@ -1,5 +1,4 @@
 import type { MetadataRoute } from "next";
-import { STORES, CATEGORIES } from "@/lib/data";
 
 const BASE = "https://gopasal.com";
 
@@ -23,8 +22,5 @@ export default function sitemap(): MetadataRoute.Sitemap {
     "/legal/cookies",
   ].map((path) => ({ url: `${BASE}${path}`, lastModified: now }));
 
-  const stores = STORES.map((s) => ({ url: `${BASE}/store/${s.slug}`, lastModified: now }));
-  const cats = CATEGORIES.map((c) => ({ url: `${BASE}/category/${c.slug}`, lastModified: now }));
-
-  return [...routes, ...cats, ...stores];
+  return routes;
 }

@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Mail, Phone, MapPin, Clock } from "lucide-react";
+import { Mail, MapPin, LifeBuoy } from "lucide-react";
 import { Container, Button, Badge } from "@/components/primitives";
 import { Reveal } from "@/components/Reveal";
 
@@ -8,30 +8,6 @@ export const metadata: Metadata = {
   description:
     "Get in touch with GoPasal — email, phone, or send us a message. Based in Kathmandu, Nepal. Operated by Velayon Dynamics Pvt. Ltd.",
 };
-
-function Field({
-  label,
-  name,
-  placeholder,
-  type = "text",
-}: {
-  label: string;
-  name: string;
-  placeholder: string;
-  type?: string;
-}) {
-  return (
-    <label className="block">
-      <span className="mb-1 block text-sm font-medium text-ink-700">{label}</span>
-      <input
-        name={name}
-        type={type}
-        placeholder={placeholder}
-        className="h-11 w-full rounded-xl border border-ink-200 bg-white px-3 text-sm outline-none focus:border-crimson-300 focus:ring-4 focus:ring-crimson-50"
-      />
-    </label>
-  );
-}
 
 export default function ContactPage() {
   return (
@@ -81,22 +57,13 @@ export default function ContactPage() {
                     <p className="mt-1 text-sm text-ink-600">hello@gopasal.com</p>
                   </div>
                 </a>
-                <a href="tel:+97716000000" className="gp-card flex items-start gap-4 p-6">
-                  <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-crimson-50 text-crimson-600">
-                    <Phone className="h-5 w-5" />
-                  </span>
-                  <div>
-                    <h2 className="text-base font-bold text-ink-900">Phone</h2>
-                    <p className="mt-1 text-sm text-ink-600">+977 1 6000000</p>
-                  </div>
-                </a>
                 <div className="gp-card flex items-start gap-4 p-6">
                   <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-crimson-50 text-crimson-600">
-                    <Clock className="h-5 w-5" />
+                    <LifeBuoy className="h-5 w-5" />
                   </span>
                   <div>
-                    <h2 className="text-base font-bold text-ink-900">Support hours</h2>
-                    <p className="mt-1 text-sm text-ink-600">Sunday – Friday, 9:00 AM – 6:00 PM NPT</p>
+                    <h2 className="text-base font-bold text-ink-900">In-app support</h2>
+                    <p className="mt-1 text-sm text-ink-600">Open a persisted ticket and follow staff replies.</p>
                   </div>
                 </div>
               </div>
@@ -105,41 +72,11 @@ export default function ContactPage() {
             {/* Form */}
             <Reveal delay={1}>
               <div className="rounded-3xl border border-ink-100 bg-white p-6 md:p-8">
-                <h2 className="text-xl font-bold text-ink-900">Send us a message</h2>
+                <h2 className="text-xl font-bold text-ink-900">Open a support ticket</h2>
                 <p className="mt-1 text-sm text-ink-500">
-                  We usually reply within one business day.
+                  Sign in to send a request through GoPasal. The API persists the ticket and staff replies are visible from the same help centre.
                 </p>
-                <form className="mt-6 space-y-4" action="#" method="post">
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <Field label="Full name" name="name" placeholder="Sita Sharma" />
-                    <Field
-                      label="Email"
-                      name="email"
-                      type="email"
-                      placeholder="you@example.com"
-                    />
-                  </div>
-                  <Field label="Subject" name="subject" placeholder="How can we help?" />
-                  <label className="block">
-                    <span className="mb-1 block text-sm font-medium text-ink-700">Message</span>
-                    <textarea
-                      name="message"
-                      rows={5}
-                      placeholder="Tell us a bit more…"
-                      className="w-full rounded-xl border border-ink-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-crimson-300 focus:ring-4 focus:ring-crimson-50"
-                    />
-                  </label>
-                  <Button type="submit" className="w-full">
-                    Send message
-                  </Button>
-                  <p className="text-center text-xs text-ink-400">
-                    By sending, you agree to our{" "}
-                    <a href="/legal/privacy" className="font-medium text-crimson-600 hover:underline">
-                      Privacy Policy
-                    </a>
-                    .
-                  </p>
-                </form>
+                <Button href="/support" className="mt-6 w-full">Go to support</Button>
               </div>
             </Reveal>
           </div>

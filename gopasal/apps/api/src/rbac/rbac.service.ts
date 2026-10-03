@@ -94,6 +94,34 @@ export class RbacService {
   }
 
   /** Convenience single-check (loads context internally). */
+  /**
+   * Everyone at one shop who holds a permission.
+   *
+   * The reverse of `can`, and it exists because notifying "the shop" by
+   * notifying its owner is wrong the moment a shop has staff. A counter
+   * assistant with `orders.view` is the person actually standing there when an
+   * order arrives; the owner may be asleep. Anything addressed to a shop should
+   * reach whoever can act on it, which is what a permission means.
+   *
+   * Privileged roles are included without the key being listed against them,
+   * matching `can`'s own rule — a privileged role holds everything.
+   *
+   * Suspended memberships and non-ACTIVE users are excluded here rather than by
+   * the caller, so no notification path can forget to.
+   */
+  async usersWithShopPermission(shopId: string, key: string): Promise<string[]> {
+    const memberships = await this.prisma.shopMembership.findMany({
+      where: {
+        shopId,
+        status: 'ACTIVE',
+        user: { status: 'ACTIVE' },
+        OR: [{ role: { isPrivileged: true } }, { role: { permissions: { some: { permissionKey: key } } } }],
+      },
+      select: { userId: true },
+    });
+    return [...new Set(memberships.map((m) => m.userId))];
+  }
+
   async can(userId: string, key: string, shopId?: string): Promise<boolean> {
     const ctx = await this.loadContext(userId);
     return this.contextCan(ctx, key, shopId);

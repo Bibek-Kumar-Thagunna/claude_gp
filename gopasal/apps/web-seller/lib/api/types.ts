@@ -80,6 +80,9 @@ export type Application = {
   fullAddress: string | null;
   lat: number | null;
   lng: number | null;
+  locationAccuracyM: number | null;
+  locationCapturedAt: string | null;
+  locationCaptureMethod: string | null;
   deliveryRadiusKm: number;
   hours: string | null;
   soloMode: boolean;
@@ -130,8 +133,6 @@ export type ApplicationFields = {
   contactEmail?: string;
   area?: string;
   fullAddress?: string;
-  lat?: number;
-  lng?: number;
   deliveryRadiusKm?: number;
   hours?: string;
   soloMode?: boolean;

@@ -1,0 +1,66 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gopasal
+  annotations:
+    kubernetes.io/ingress.class: replace-with-controller
+spec:
+  tls:
+    - secretName: gopasal-tls
+      hosts:
+        - api.example.invalid
+        - app.example.invalid
+        - seller.example.invalid
+        - admin.example.invalid
+        - rider.example.invalid
+  rules:
+    - host: api.example.invalid
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  name: http
+    - host: app.example.invalid
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: customer
+                port:
+                  name: http
+    - host: seller.example.invalid
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: seller
+                port:
+                  name: http
+    - host: admin.example.invalid
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: admin
+                port:
+                  name: http
+    - host: rider.example.invalid
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: rider
+                port:
+                  name: http

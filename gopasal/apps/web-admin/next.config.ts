@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
+import { secureNextConfig } from "../next-security";
 
-const nextConfig: NextConfig = {
+const nextConfig: NextConfig = secureNextConfig({
   reactStrictMode: true,
   // Workspace packages ship TypeScript source, not a build output, so Next has to
   // compile them itself.
@@ -8,10 +9,7 @@ const nextConfig: NextConfig = {
   experimental: {
     optimizePackageImports: ["lucide-react", "framer-motion"],
   },
-  images: {
-    formats: ["image/avif", "image/webp"],
-    remotePatterns: [{ protocol: "https", hostname: "**" }],
-  },
-};
+  images: { formats: ["image/avif", "image/webp"] },
+});
 
 export default nextConfig;

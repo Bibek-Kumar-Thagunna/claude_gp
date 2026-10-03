@@ -1,0 +1,50 @@
+@import "@gopasal/tokens/tokens.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * { border-color: var(--gp-border); }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    min-height: 100dvh;
+    background: #f7f5f4;
+    color: var(--gp-text);
+    font-family: var(--gp-font-body);
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3 { font-family: var(--gp-font-display); letter-spacing: -0.02em; }
+  :focus-visible { outline: 3px solid rgba(225, 25, 69, .42); outline-offset: 2px; }
+  ::selection { background: var(--gp-crimson); color: white; }
+}
+
+@layer components {
+  .rider-shell { width: min(100%, 760px); margin-inline: auto; padding-inline: 1rem; }
+  .rider-card {
+    border: 1px solid var(--gp-border);
+    border-radius: 1.25rem;
+    background: white;
+    box-shadow: 0 10px 30px rgba(36, 29, 30, .06);
+  }
+  .rider-button {
+    display: inline-flex;
+    min-height: 3rem;
+    align-items: center;
+    justify-content: center;
+    gap: .5rem;
+    border-radius: .9rem;
+    padding: .7rem 1rem;
+    font-weight: 700;
+    transition: transform .14s ease, box-shadow .2s ease, background-color .2s ease;
+  }
+  .rider-button:active { transform: scale(.985); }
+  .rider-button:disabled { cursor: not-allowed; opacity: .55; }
+  .rider-primary { background: linear-gradient(135deg, #e11945, #bd1037); color: white; box-shadow: 0 12px 24px rgba(225,25,69,.22); }
+  .rider-secondary { border: 1px solid var(--gp-border); background: white; color: var(--gp-text); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+}

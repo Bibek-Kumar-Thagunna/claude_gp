@@ -68,6 +68,9 @@ export type SellerShop = {
   phone: string | null;
   lat: number | null;
   lng: number | null;
+  locationAccuracyM: number | null;
+  locationCapturedAt: string | null;
+  locationCaptureMethod: string | null;
   deliveryRadiusKm: number;
 
   /** Free text as the shop wrote it, e.g. "6:30am – 9pm". Not a schedule. */
@@ -86,6 +89,9 @@ export type SellerShop = {
   ratingCount: number;
   productCount: number;
   orderCount: number;
+  storefrontVisible: boolean;
+  storefrontBlockers: Array<"APPROVAL" | "VERIFIED_LOCATION" | "DELIVERABLE_PRODUCT">;
+  deliverableProductCount: number;
 
   /** The caller's role on this shop, for display. */
   roleName: string;
@@ -100,7 +106,7 @@ export type SellerShop = {
 };
 
 const STATUS_LABELS: Record<ShopLifecycle, string> = {
-  ACTIVE: "Live",
+  ACTIVE: "Approved",
   PENDING: "Awaiting approval",
   SUSPENDED: "Suspended",
   REJECTED: "Rejected",
@@ -154,6 +160,9 @@ function toSellerShop(wire: SellerShopWire, access?: ShopAccess): SellerShop {
     phone: wire.phone,
     lat: wire.lat,
     lng: wire.lng,
+    locationAccuracyM: wire.locationAccuracyM,
+    locationCapturedAt: wire.locationCapturedAt,
+    locationCaptureMethod: wire.locationCaptureMethod,
     deliveryRadiusKm: wire.deliveryRadiusKm,
 
     hours: wire.hours,
@@ -168,6 +177,9 @@ function toSellerShop(wire: SellerShopWire, access?: ShopAccess): SellerShop {
     ratingCount: wire.ratingCount,
     productCount: wire._count.products,
     orderCount: wire._count.orders,
+    storefrontVisible: wire.storefront.visible,
+    storefrontBlockers: wire.storefront.blockers,
+    deliverableProductCount: wire.storefront.deliverableProductCount,
 
     roleName: wire.myRole.name,
     rolePrivileged: wire.myRole.isPrivileged,

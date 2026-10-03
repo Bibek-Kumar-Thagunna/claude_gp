@@ -1,7 +1,8 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Transform, Type } from 'class-transformer';
+import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
+import { Transform, Type } from "class-transformer";
 import {
   IsArray,
+  IsBoolean,
   IsEnum,
   IsIn,
   IsInt,
@@ -10,42 +11,73 @@ import {
   Max,
   MaxLength,
   Min,
-} from 'class-validator';
-import { OrderStatus, PaymentMethod } from '@prisma/client';
-import { SEARCH_MAX_LENGTH } from '../../../common/dto/pagination.dto';
+  MinLength,
+} from "class-validator";
+import { OrderStatus, PaymentMethod } from "@prisma/client";
+import { SEARCH_MAX_LENGTH } from "../../../common/dto/pagination.dto";
+
+const CHECKOUT_PAYMENT_METHODS = [
+  PaymentMethod.COD,
+  PaymentMethod.ESEWA,
+  PaymentMethod.KHALTI,
+] as const;
 
 export class CheckoutDto {
-  @ApiProperty({ description: 'Delivery address id (must belong to the user)' })
+  @ApiProperty({ description: "Delivery address id (must belong to the user)" })
   @IsString()
   addressId!: string;
 
-  @ApiProperty({ enum: PaymentMethod, default: PaymentMethod.COD })
-  @IsEnum(PaymentMethod)
+  @ApiProperty({ enum: CHECKOUT_PAYMENT_METHODS, default: PaymentMethod.COD })
+  @IsIn(CHECKOUT_PAYMENT_METHODS)
   paymentMethod!: PaymentMethod;
 
-  @ApiPropertyOptional({ description: 'Coupon code to apply' })
+  @ApiPropertyOptional({ description: "Coupon code to apply" })
   @IsOptional()
   @IsString()
+  @MaxLength(64)
   couponCode?: string;
 
-  @ApiPropertyOptional({ description: 'Note for the shop / rider' })
+  @ApiPropertyOptional({ description: "Note for the shop / rider" })
   @IsOptional()
   @IsString()
   @MaxLength(280)
   note?: string;
+
+  @ApiPropertyOptional({ description: "Apply the maximum eligible GoCoins balance" })
+  @IsOptional()
+  @IsBoolean()
+  useGoCoins?: boolean;
+}
+
+export class CheckoutQuoteDto {
+  @ApiProperty({ description: "Delivery address id (must belong to the user)" })
+  @IsString()
+  addressId!: string;
+
+  @ApiPropertyOptional({ description: "Coupon code to include in the quote" })
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  couponCode?: string;
+
+  @ApiPropertyOptional({ description: "Include the maximum eligible GoCoins discount" })
+  @IsOptional()
+  @IsBoolean()
+  useGoCoins?: boolean;
 }
 
 export class CancelOrderDto {
-  @ApiPropertyOptional()
-  @IsOptional()
+  @ApiProperty()
   @IsString()
+  @MinLength(3)
   @MaxLength(280)
-  reason?: string;
+  reason!: string;
 }
 
 export class RejectOrderDto {
   @ApiProperty()
   @IsString()
+  @MinLength(3)
   @MaxLength(280)
   reason!: string;
 }
@@ -65,7 +97,7 @@ export class ApplyCouponDto {
 }
 
 /** Newest-first is the queue's working order; oldest-first is for clearing a backlog. */
-export const ORDER_SORTS = ['newest', 'oldest'] as const;
+export const ORDER_SORTS = ["newest", "oldest"] as const;
 export type OrderSort = (typeof ORDER_SORTS)[number];
 
 /**
@@ -77,9 +109,9 @@ export type OrderSort = (typeof ORDER_SORTS)[number];
  * `value` as `any`, and letting that leak turns the decorator into an unchecked hole.
  */
 function toStatusList(value: unknown): unknown {
-  if (typeof value !== 'string') return value;
+  if (typeof value !== "string") return value;
   return value
-    .split(',')
+    .split(",")
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
 }
@@ -120,7 +152,7 @@ export class ListShopOrdersQueryDto {
   limit = 20;
 
   @ApiPropertyOptional({
-    description: 'Matches order code, recipient name or delivery area (case-insensitive)',
+    description: "Matches order code, recipient name or delivery area (case-insensitive)",
   })
   @IsOptional()
   @IsString()
@@ -130,7 +162,7 @@ export class ListShopOrdersQueryDto {
   @ApiPropertyOptional({
     enum: OrderStatus,
     isArray: true,
-    description: 'One status, or several comma-separated (e.g. ACCEPTED,PACKED)',
+    description: "One status, or several comma-separated (e.g. ACCEPTED,PACKED)",
   })
   @IsOptional()
   @Transform(({ value }: { value: unknown }) => toStatusList(value))
@@ -138,10 +170,10 @@ export class ListShopOrdersQueryDto {
   @IsEnum(OrderStatus, { each: true })
   status?: OrderStatus[];
 
-  @ApiPropertyOptional({ enum: ORDER_SORTS, default: 'newest' })
+  @ApiPropertyOptional({ enum: ORDER_SORTS, default: "newest" })
   @IsOptional()
   @IsIn(ORDER_SORTS)
-  sort: OrderSort = 'newest';
+  sort: OrderSort = "newest";
 
   get skip(): number {
     return (this.page - 1) * this.limit;

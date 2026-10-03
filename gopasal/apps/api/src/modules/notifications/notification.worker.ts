@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nest
 import { Worker } from 'bullmq';
 import { RedisService } from '../../common/redis/redis.service';
 import { PUSH_PROVIDER, PushProvider } from '../../providers/push.provider';
+import { DeviceTokensService } from './device-tokens.service';
 import type { JsonObject } from '../../common/types/json';
 import { NotificationsService } from './notifications.service';
 import { NOTIFICATIONS_QUEUE, NotificationJob } from './notification.queue';
@@ -42,9 +43,14 @@ export class NotificationWorker implements OnModuleInit, OnModuleDestroy {
     private readonly redis: RedisService,
     private readonly notifications: NotificationsService,
     @Inject(PUSH_PROVIDER) private readonly push: PushProvider,
+    private readonly devices: DeviceTokensService,
   ) {}
 
   onModuleInit(): void {
+    // The provider reports tokens the push service has rejected as gone; the
+    // registry is the only thing that can act on that, and the provider must
+    // not know about the database. This is the join.
+    this.push.onInvalidTokens = (tokens) => this.devices.disable(tokens);
     try {
       this.worker = new Worker<NotificationJob>(
         NOTIFICATIONS_QUEUE,
@@ -74,15 +80,28 @@ export class NotificationWorker implements OnModuleInit, OnModuleDestroy {
     });
 
     if (data.push) {
-      // Device-token registry is a later addition; until then we address the
-      // user logically so the provider (log/FCM) records intent. Push failures
-      // are swallowed — the in-app row already landed.
+      /*
+        Real device tokens, or nothing.
+
+        This used to address `user:<id>` — a placeholder from before the
+        registry existed, which every provider could only log. Now it is the
+        tokens the customer's phones actually registered, and a user with no
+        phone registered is simply not pushed to: the in-app row has already
+        landed and is the source of truth.
+
+        Failures are swallowed on purpose. A push that did not go out must not
+        fail the job and re-run the whole notification, because the row would
+        then be written twice.
+      */
       try {
-        await this.push.send([`user:${data.userId}`], {
-          title: data.title,
-          body: data.body,
-          data: { type: data.type, ...toPushData(data.data) },
-        });
+        const tokens = await this.devices.liveTokensFor(data.userId);
+        if (tokens.length > 0) {
+          await this.push.send(tokens, {
+            title: data.title,
+            body: data.body,
+            data: { type: data.type, ...toPushData(data.data) },
+          });
+        }
       } catch (err) {
         this.logger.warn(`Push failed for ${data.userId}: ${(err as Error).message}`);
       }

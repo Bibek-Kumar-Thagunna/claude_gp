@@ -251,13 +251,13 @@ export class InvitesService {
    * phone number must be the invited one — the link alone is never enough, so
    * forwarding it to someone else grants them nothing.
    */
-  async accept(userId: string, input: { token?: string; code?: string }) {
+  async accept(userId: string, input: { token?: string; code?: string; scope?: RbacScope }) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
 
     const invite = input.token
       ? await this.findByToken(input.token)
-      : await this.findByCode(user.phone, input.code);
+      : await this.findByCode(user.phone, input.code, input.scope);
 
     // Wrong account: the most common real-world case is a shared phone or a
     // second SIM, so name the number they need rather than just refusing.
@@ -458,30 +458,42 @@ export class InvitesService {
   }
 
   /**
-   * Code path. The invite is found by phone number *first*; the six-digit code
-   * is then compared in constant time and every miss is counted, so the short
-   * code never becomes an enumeration surface.
+   * Code path. Candidate invites are found by the authenticated phone number
+   * first, then each digest is compared in constant time. Looking through all
+   * live candidates matters when one person has invitations for two shops (or
+   * both consoles): a newer invite must not silently invalidate an older code.
    */
-  private async findByCode(phone: string, code?: string) {
+  private async findByCode(phone: string, code?: string, scope?: RbacScope) {
     if (!code) throw new BadRequestException('Enter the invitation code you were given.');
-    const invite = await this.prisma.staffInvite.findFirst({
-      where: { phone, status: 'PENDING' },
+    const invites = await this.prisma.staffInvite.findMany({
+      where: { phone, status: 'PENDING', ...(scope ? { scope } : {}) },
       orderBy: { createdAt: 'desc' },
+      take: 200,
       include: this.inviteInclude,
     });
-    if (!invite) throw new NotFoundException('No invitation is waiting for this number.');
+    if (invites.length === 0) throw new NotFoundException('No invitation is waiting for this number.');
 
-    if (invite.attempts >= INVITE_MAX_ATTEMPTS) {
+    const expectedHash = hashInviteCode(code.trim(), phone);
+    const invite = invites.find((candidate) => constantTimeEquals(candidate.codeHash, expectedHash));
+    if (invite) {
+      if (invite.attempts >= INVITE_MAX_ATTEMPTS) {
+        throw new BadRequestException('Too many incorrect codes. Ask for the invitation to be sent again.');
+      }
+      return invite;
+    }
+
+    // Count a miss against the newest still-usable candidate. Together with
+    // the authenticated-phone requirement and route throttling this bounds
+    // guessing without letting one locked invite disable another valid code.
+    const counted = invites.find((candidate) => candidate.attempts < INVITE_MAX_ATTEMPTS);
+    if (!counted) {
       throw new BadRequestException('Too many incorrect codes. Ask for the invitation to be sent again.');
     }
-    if (!constantTimeEquals(invite.codeHash, hashInviteCode(code.trim(), phone))) {
-      await this.prisma.staffInvite.update({
-        where: { id: invite.id },
-        data: { attempts: { increment: 1 } },
-      });
-      throw new BadRequestException('That code is not right. Check it and try again.');
-    }
-    return invite;
+    await this.prisma.staffInvite.update({
+      where: { id: counted.id },
+      data: { attempts: { increment: 1 } },
+    });
+    throw new BadRequestException('That code is not right. Check it and try again.');
   }
 
   /** Lazily flip a lapsed PENDING invite to EXPIRED when anyone looks at it. */
@@ -523,7 +535,11 @@ export class InvitesService {
       `or enter code ${code}. — GoPasal`;
     try {
       await this.sms.send(invite.phone, message);
-      return 'sent';
+      // The development provider resolves because it successfully wrote the
+      // message to its local log/outbox, not because a handset received it.
+      // Persist that distinction so neither console can display "Delivered"
+      // merely from a successful method call.
+      return this.sms.delivers ? 'sent' : 'development: not delivered';
     } catch (err) {
       const reason = err instanceof Error ? err.message : 'unknown error';
       this.logger.warn(`invite SMS to ${maskPhone(invite.phone)} failed: ${reason}`);

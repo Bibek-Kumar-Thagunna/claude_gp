@@ -84,7 +84,11 @@ export const SHOP_PERMISSIONS: PermissionDef[] = [
   { key: 'reviews.view', label: 'View reviews', group: 'Reviews', scope: 'SHOP' },
   { key: 'reviews.reply', label: 'Reply to reviews', group: 'Reviews', scope: 'SHOP' },
 
+  { key: 'messages.view', label: 'View customer messages', group: 'Messages', scope: 'SHOP' },
+  { key: 'messages.respond', label: 'Reply to customers', group: 'Messages', scope: 'SHOP' },
+
   { key: 'analytics.view', label: 'View analytics', group: 'Analytics', scope: 'SHOP' },
+  { key: 'finance.view', label: 'View finance & settlements', group: 'Finance', scope: 'SHOP' },
 
   { key: 'team.view', label: 'View team', group: 'Team', scope: 'SHOP' },
   { key: 'team.invite', label: 'Invite / remove staff', group: 'Team', scope: 'SHOP' },
@@ -119,12 +123,18 @@ export const PLATFORM_PERMISSIONS: PermissionDef[] = [
   { key: 'policy.publish', label: 'Publish policy versions', group: 'Policy', scope: 'PLATFORM' },
 
   { key: 'analytics.platform.view', label: 'View platform analytics', group: 'Analytics', scope: 'PLATFORM' },
-  { key: 'finance.view', label: 'View finance', group: 'Finance', scope: 'PLATFORM' },
+  { key: 'finance.platform.view', label: 'View platform finance', group: 'Finance', scope: 'PLATFORM' },
+  { key: 'finance.manage', label: 'Reconcile, refund & settle', group: 'Finance', scope: 'PLATFORM' },
+
+  { key: 'settings.platform.view', label: 'View platform configuration', group: 'Settings', scope: 'PLATFORM' },
+  { key: 'settings.platform.manage', label: 'Manage platform configuration', group: 'Settings', scope: 'PLATFORM' },
 
   { key: 'support.view', label: 'View support tickets', group: 'Support', scope: 'PLATFORM' },
   { key: 'support.respond', label: 'Respond to tickets', group: 'Support', scope: 'PLATFORM' },
 
   { key: 'audit.view', label: 'View audit log', group: 'Compliance', scope: 'PLATFORM' },
+  { key: 'privacy.view', label: 'View privacy compliance', group: 'Compliance', scope: 'PLATFORM' },
+  { key: 'privacy.manage', label: 'Manage privacy compliance', group: 'Compliance', scope: 'PLATFORM' },
   { key: 'rbac.platform.manage', label: 'Manage platform roles', group: 'Compliance', scope: 'PLATFORM' },
 ];
 
@@ -153,7 +163,8 @@ export const DEFAULT_SHOP_ROLES: RoleDef[] = [
       'orders.dispatch', 'orders.complete', 'orders.cancel', 'delivery.view', 'delivery.assign',
       'delivery.update', 'catalog.view', 'catalog.create', 'catalog.edit', 'inventory.view',
       'inventory.adjust', 'promotions.view', 'promotions.manage', 'reviews.view', 'reviews.reply',
-      'analytics.view', 'team.view', 'settings.view',
+      'messages.view', 'messages.respond', 'analytics.view', 'team.view', 'settings.view',
+      'finance.view',
     ],
   },
   {
@@ -162,6 +173,7 @@ export const DEFAULT_SHOP_ROLES: RoleDef[] = [
     permissions: [
       'dashboard.view', 'orders.view', 'orders.accept', 'orders.reject', 'orders.pack',
       'orders.dispatch', 'orders.complete', 'delivery.view',
+      'messages.view', 'messages.respond',
     ],
   },
   {
@@ -175,7 +187,10 @@ export const DEFAULT_SHOP_ROLES: RoleDef[] = [
   {
     name: 'Support Staff',
     description: 'Handles customer questions and reviews',
-    permissions: ['dashboard.view', 'orders.view', 'reviews.view', 'reviews.reply'],
+    permissions: [
+      'dashboard.view', 'orders.view', 'reviews.view', 'reviews.reply',
+      'messages.view', 'messages.respond',
+    ],
   },
   {
     name: 'Delivery',
@@ -192,6 +207,7 @@ export const DEFAULT_PLATFORM_ROLES: RoleDef[] = [
     permissions: [
       'admin.dashboard.view', 'shops.view', 'shops.approve', 'shops.suspend', 'shops.reject',
       'users.view', 'catalog.moderate', 'analytics.platform.view', 'support.view', 'support.respond',
+      'settings.platform.view',
     ],
   },
   {
@@ -204,12 +220,12 @@ export const DEFAULT_PLATFORM_ROLES: RoleDef[] = [
     description: 'Reviews fraud, disputes and policy',
     permissions: [
       'admin.dashboard.view', 'fraud.view', 'fraud.manage', 'disputes.view', 'disputes.resolve',
-      'policy.view', 'policy.publish', 'audit.view',
+      'policy.view', 'policy.publish', 'audit.view', 'privacy.view', 'privacy.manage',
     ],
   },
   {
     name: 'Finance Viewer',
     description: 'Read-only financial visibility',
-    permissions: ['admin.dashboard.view', 'finance.view', 'analytics.platform.view'],
+    permissions: ['admin.dashboard.view', 'finance.platform.view', 'analytics.platform.view'],
   },
 ];

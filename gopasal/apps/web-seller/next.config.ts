@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { secureNextConfig } from "../next-security";
 
 /**
  * Hosts `next/image` is allowed to fetch and optimise.
@@ -34,37 +35,7 @@ import type { NextConfig } from "next";
  * for a misconfiguration whose quiet outcome is "anyone may proxy anything through
  * us". Concrete hosts only, one per entry.
  */
-function imagePatterns(): { protocol: "http" | "https"; hostname: string; port?: string }[] {
-  const patterns: { protocol: "http" | "https"; hostname: string; port?: string }[] = [];
-  const seen = new Set<string>();
-
-  const add = (raw: string | undefined, defaultProtocol: "http" | "https") => {
-    const value = raw?.trim();
-    if (!value || value.startsWith("__")) return;
-    let url: URL;
-    try {
-      url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(value) ? value : `${defaultProtocol}://${value}`);
-    } catch {
-      return;
-    }
-    if (url.hostname.includes("*")) {
-      throw new Error(
-        `Refusing to allow the wildcard image host "${url.hostname}". next/image would then fetch and re-serve arbitrary URLs through this console. List each host on its own.`,
-      );
-    }
-    const protocol = url.protocol === "http:" ? "http" : "https";
-    const key = `${protocol}//${url.hostname}:${url.port}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-    patterns.push({ protocol, hostname: url.hostname, ...(url.port ? { port: url.port } : {}) });
-  };
-
-  add(process.env.NEXT_PUBLIC_API_URL, "https");
-  for (const host of (process.env.NEXT_PUBLIC_IMAGE_HOSTS ?? "").split(",")) add(host, "https");
-  return patterns;
-}
-
-const nextConfig: NextConfig = {
+const nextConfig: NextConfig = secureNextConfig({
   reactStrictMode: true,
   // Workspace packages ship TypeScript source, not a build output, so Next has to
   // compile them itself.
@@ -74,8 +45,7 @@ const nextConfig: NextConfig = {
   },
   images: {
     formats: ["image/avif", "image/webp"],
-    remotePatterns: imagePatterns(),
   },
-};
+});
 
 export default nextConfig;

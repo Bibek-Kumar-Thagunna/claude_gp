@@ -1,5 +1,6 @@
 import * as React from "react";
 import { AlertTriangle, Loader2, WifiOff } from "lucide-react";
+import { Logo } from "@gopasal/ui";
 import { Button, Card } from "@/components/primitives";
 import { cn } from "@/lib/cn";
 
@@ -23,6 +24,27 @@ export function LoadingPanel({ label = "Loading…" }: { label?: string }) {
       <Spinner className="h-5 w-5 text-crimson-500" />
       <span role="status">{label}</span>
     </Card>
+  );
+}
+
+/** Full-screen, brand-light boot state used only while restoring a session. */
+export function ConsoleBoot({ label }: { label: string }) {
+  return (
+    <div className="relative flex min-h-[100dvh] items-center justify-center overflow-hidden bg-[#f8f8fa] px-6">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_20%,rgba(232,24,75,0.07),transparent_34%)]" />
+      <div className="relative flex w-full max-w-xs flex-col items-center text-center">
+        <Logo variant="full" height={36} />
+        <span className="mt-3 rounded-full border border-crimson-100 bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-crimson-600">
+          Admin console
+        </span>
+        <div className="mt-9 h-1 w-44 overflow-hidden rounded-full bg-ink-100" aria-hidden>
+          <div className="h-full w-1/2 animate-pulse rounded-full bg-crimson-500" />
+        </div>
+        <p className="mt-4 text-sm text-ink-500" role="status" aria-live="polite">
+          {label}
+        </p>
+      </div>
+    </div>
   );
 }
 

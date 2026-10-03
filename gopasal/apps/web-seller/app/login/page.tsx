@@ -27,7 +27,7 @@ import {
 import { requestOtp, verifyOtp } from "@/lib/api/client";
 import { cn } from "@/lib/cn";
 
-const CODE_LENGTH = 4;
+const CODE_LENGTH = 6;
 
 export default function LoginPage() {
   const router = useRouter();
@@ -42,6 +42,7 @@ export default function LoginPage() {
   const [challenge, setChallenge] = React.useState<{
     delivered: boolean;
     expiresInSeconds: number;
+    developmentCode?: string;
   } | null>(null);
   const [cooldown, setCooldown] = React.useState(0);
 
@@ -50,7 +51,7 @@ export default function LoginPage() {
 
   // Already signed in — nothing to do here but move on.
   React.useEffect(() => {
-    if (status === "authenticated" && me) router.replace(landingPath(me));
+    if (status === "authenticated" && me) router.replace(readSafeReturnTo() ?? landingPath(me));
   }, [status, me, router]);
 
   // The API enforces a resend cooldown and tells us how long it is; the button
@@ -67,7 +68,11 @@ export default function LoginPage() {
       setError(null);
       try {
         const result = await requestOtp(phone);
-        setChallenge({ delivered: result.delivered, expiresInSeconds: result.expiresInSeconds });
+        setChallenge({
+          delivered: result.delivered,
+          expiresInSeconds: result.expiresInSeconds,
+          developmentCode: result.developmentCode,
+        });
         setCooldown(result.cooldownSeconds);
         setStep("otp");
         if (resend) setCode(Array.from({ length: CODE_LENGTH }, () => ""));
@@ -95,7 +100,7 @@ export default function LoginPage() {
     try {
       const result = await verifyOtp(phone, fullCode);
       const next = await signIn(result.tokens, result.user);
-      router.replace(landingPath(next));
+      router.replace(readSafeReturnTo() ?? landingPath(next));
     } catch (err) {
       /*
         The fallback keeps its own wording rather than going through `asApiError`:
@@ -293,9 +298,16 @@ export default function LoginPage() {
                 </div>
 
                 {challenge && !challenge.delivered && (
-                  <InlineNotice message="SMS delivery is switched off in this environment, so the code is printed in the API log instead of being texted to you.">
+                  <InlineNotice message="Local development uses a non-delivering SMS transport.">
                     <p className="mt-1 text-xs text-ink-500">
-                      It expires in {Math.round(challenge.expiresInSeconds / 60)} minutes.
+                      {challenge.developmentCode ? (
+                        <>
+                          Development OTP: <strong className="font-mono text-ink-900">{challenge.developmentCode}</strong>. It still expires and is verified normally.
+                        </>
+                      ) : (
+                        <>Read the code from the API log.</>
+                      )}{" "}
+                      Expires in {Math.round(challenge.expiresInSeconds / 60)} minutes.
                     </p>
                   </InlineNotice>
                 )}
@@ -351,4 +363,16 @@ export default function LoginPage() {
       </div>
     </div>
   );
+}
+
+/** Accept only same-origin internal paths; the destination still enforces RBAC. */
+function readSafeReturnTo(): string | null {
+  if (typeof window === "undefined") return null;
+  const value = new URLSearchParams(window.location.search).get("returnTo");
+  if (!value || !value.startsWith("/") || value.startsWith("//") || value.includes("\\")) return null;
+  try {
+    const parsed = new URL(value, window.location.origin);
+    if (parsed.origin !== window.location.origin || parsed.pathname === "/login") return null;
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch { return null; }
 }

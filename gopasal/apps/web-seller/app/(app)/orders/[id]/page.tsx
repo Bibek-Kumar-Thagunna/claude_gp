@@ -53,6 +53,7 @@ import {
   type ShopRider,
 } from "@/lib/orders-view";
 import { deliveryStepLabel, riderStatusLabel, vehicleLabel } from "@/lib/delivery-view";
+import { DeliveryProofPhoto } from "@/components/delivery/DeliveryProofPhoto";
 
 /**
  * One order, read from `GET /seller/shops/:shopId/orders/:orderId`.
@@ -332,6 +333,10 @@ function OrderDetailView({
    */
   const [codCollected, setCodCollected] = React.useState(true);
   const [podNote, setPodNote] = React.useState("");
+  const [returnNote, setReturnNote] = React.useState("");
+  const selectedRider = riders.find((r) => r.id === riderId);
+  const selectedRiderAvailable =
+    selectedRider?.status === "ONLINE" && selectedRider.activeDeliveries === 0;
 
   const a = o.actions;
   const may = (key: string) => canInShop(shopId, key);
@@ -365,6 +370,57 @@ function OrderDetailView({
   /** `PACKED` with no rider: the dispatch endpoint would 400, so say why. */
   const needsRiderToDispatch = o.status === "PACKED" && o.rider === null;
   const handover = a.nextDeliveryStatus === "DELIVERED" && canWalkLeg;
+  const returnConfirmation = a.nextDeliveryStatus === "RETURNED_TO_SHOP" && canWalkLeg;
+  const nextAction = canAccept
+    ? {
+        title: "Review and accept this order",
+        detail: "Confirm the items are available before the customer starts waiting.",
+        icon: Check,
+      }
+    : canPack
+      ? {
+          title: "Prepare and pack the items",
+          detail:
+            "Check quantities, substitutions and the customer note, then mark the order packed.",
+          icon: PackageCheck,
+        }
+      : needsRiderToDispatch
+        ? {
+            title: "Assign a delivery rider",
+            detail: "This order is packed. Choose an available rider in the delivery panel below.",
+            icon: Bike,
+          }
+        : canDispatch
+          ? {
+              title: "Hand the packed order to the rider",
+              detail: "Confirm the assigned rider has physically received the package.",
+              icon: Truck,
+            }
+          : nextLeg !== null &&
+              nextLeg !== "DELIVERED" &&
+              nextLeg !== "RETURNED_TO_SHOP" &&
+              may("delivery.update")
+            ? {
+                title: deliveryStepLabel(nextLeg),
+                detail: "Update the delivery only when this step has actually happened.",
+                icon: Route,
+              }
+            : returnConfirmation
+              ? {
+                  title: "Receive the returned parcel",
+                  detail:
+                    "Physically check the parcel and record its condition before releasing the rider.",
+                  icon: PackageCheck,
+                }
+              : handover
+                ? {
+                    title: "Confirm delivery at the customer’s door",
+                    detail: o.isCod
+                      ? `Verify the rider collected ${rs(o.total)} before closing the order.`
+                      : "Confirm the customer received the order before closing it.",
+                    icon: ShieldCheck,
+                  }
+                : null;
 
   return (
     <div>
@@ -394,6 +450,23 @@ function OrderDetailView({
 
       {actionError && <InlineError message={actionError} className="mb-4" />}
 
+      {nextAction && (
+        <div className="mb-4 overflow-hidden rounded-2xl border border-crimson-100 bg-gradient-to-r from-crimson-50 via-white to-white shadow-sm">
+          <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:p-5">
+            <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-[#c02636] text-white shadow-sm">
+              <nextAction.icon className="h-5 w-5" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] font-bold uppercase tracking-[.16em] text-[#c02636]">
+                Next required action
+              </p>
+              <h2 className="mt-0.5 text-base font-semibold text-ink-900">{nextAction.title}</h2>
+              <p className="mt-0.5 text-sm text-ink-600">{nextAction.detail}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Why an order left the flow, in the API's own words. */}
       {closed && o.cancelReason && (
         <InlineNotice
@@ -405,57 +478,100 @@ function OrderDetailView({
         The action bar. `handover` is deliberately not a button here: marking an
         order delivered takes a COD answer, so it gets its own panel below.
       */}
-      {(canAccept || canReject || canPack || canDispatch || canCancel || canFail || needsRiderToDispatch) && (
-        <Card className="mb-4">
-          <div className="flex flex-wrap items-center gap-2">
+      {(canAccept ||
+        canReject ||
+        canPack ||
+        canDispatch ||
+        canCancel ||
+        canFail ||
+        canWalkLeg ||
+        needsRiderToDispatch) && (
+        <Card className="mb-4 overflow-hidden border-ink-100 p-0">
+          <div className="border-b border-ink-100 bg-ink-50/60 px-4 py-3 sm:px-5">
+            <h2 className="text-sm font-semibold text-ink-900">Order actions</h2>
+            <p className="mt-0.5 text-xs text-ink-500">
+              Only actions allowed by this order’s current stage and your role are shown.
+            </p>
+          </div>
+          <div className="flex flex-col gap-2 p-4 sm:flex-row sm:flex-wrap sm:p-5">
             {canAccept && (
-              <Button onClick={() => void onRun(() => acceptOrder(shopId, o.id))} disabled={busy}>
+              <Button
+                className="w-full sm:w-auto"
+                onClick={() => void onRun(() => acceptOrder(shopId, o.id))}
+                disabled={busy}
+              >
                 {busy ? <Spinner /> : <Check className="h-4 w-4" />} Accept order
               </Button>
             )}
             {canPack && (
-              <Button onClick={() => void onRun(() => packOrder(shopId, o.id))} disabled={busy}>
+              <Button
+                className="w-full sm:w-auto"
+                onClick={() => void onRun(() => packOrder(shopId, o.id))}
+                disabled={busy}
+              >
                 {busy ? <Spinner /> : <PackageCheck className="h-4 w-4" />} Mark packed
               </Button>
             )}
             {canDispatch && (
-              <Button onClick={() => void onRun(() => dispatchOrder(shopId, o.id))} disabled={busy}>
+              <Button
+                className="w-full sm:w-auto"
+                onClick={() => void onRun(() => dispatchOrder(shopId, o.id))}
+                disabled={busy}
+              >
                 {busy ? <Spinner /> : <Truck className="h-4 w-4" />} Hand to rider
               </Button>
             )}
-            {nextLeg !== null && nextLeg !== "DELIVERED" && may("delivery.update") && (
+            {nextLeg !== null &&
+              nextLeg !== "DELIVERED" &&
+              nextLeg !== "RETURNED_TO_SHOP" &&
+              may("delivery.update") && (
+                <Button
+                  className="w-full sm:w-auto"
+                  variant="outline"
+                  onClick={() => void onRun(() => patchDelivery(shopId, o.id, { status: nextLeg }))}
+                  disabled={busy}
+                >
+                  {busy ? <Spinner /> : <Route className="h-4 w-4" />} {deliveryStepLabel(nextLeg)}
+                </Button>
+              )}
+            {canReject && !rejecting && (
               <Button
+                className="w-full sm:w-auto"
                 variant="outline"
-                onClick={() => void onRun(() => patchDelivery(shopId, o.id, { status: nextLeg }))}
+                onClick={() => startReason(setRejecting)}
                 disabled={busy}
               >
-                {busy ? <Spinner /> : <Route className="h-4 w-4" />} {deliveryStepLabel(nextLeg)}
-              </Button>
-            )}
-            {canReject && !rejecting && (
-              <Button variant="outline" onClick={() => startReason(setRejecting)} disabled={busy}>
                 <X className="h-4 w-4" /> Reject
               </Button>
             )}
             {canCancel && !cancelling && (
-              <Button variant="ghost" onClick={() => startReason(setCancelling)} disabled={busy}>
+              <Button
+                className="w-full sm:w-auto"
+                variant="ghost"
+                onClick={() => startReason(setCancelling)}
+                disabled={busy}
+              >
                 <Ban className="h-4 w-4" /> Cancel order
               </Button>
             )}
             {canFail && !failing && (
-              <Button variant="ghost" onClick={() => startReason(setFailing)} disabled={busy}>
+              <Button
+                className="w-full sm:w-auto"
+                variant="ghost"
+                onClick={() => startReason(setFailing)}
+                disabled={busy}
+              >
                 <Ban className="h-4 w-4" /> Delivery failed
               </Button>
             )}
           </div>
           {/*
-            One reason box, three uses. Reject demands a reason because
+            One reason box, three uses. Reject and delivery failure demand a reason because
             `RejectOrderDto.reason` is required and is written to the order the
-            customer reads; cancel and delivery-failure take an optional note,
-            which is sent only when it says something.
+            customer reads. All three actions require a specific reason.
           */}
           {(rejecting || cancelling || failing) && (
-            <div className="mt-3 border-t border-ink-100 pt-3">
+            <div className="border-t border-ink-100 bg-white p-4 sm:p-5">
               <p className="text-sm font-medium text-ink-700">
                 {rejecting
                   ? `Why are you rejecting ${o.code}? The customer will see this.`
@@ -490,7 +606,7 @@ function OrderDetailView({
                   value={reason}
                   onChange={(e) => setReason(e.target.value)}
                   maxLength={280}
-                  placeholder={rejecting ? "Or type the reason" : "Or type a note (optional)"}
+                  placeholder="Or type the reason"
                   className="h-10 flex-1 rounded-xl border border-ink-200 px-3 text-sm outline-none focus:border-crimson-300"
                 />
                 <div className="flex gap-2">
@@ -500,17 +616,14 @@ function OrderDetailView({
                   <Button
                     variant="danger"
                     size="sm"
-                    disabled={busy || (rejecting && reason.trim().length === 0)}
+                    disabled={busy || reason.trim().length < 3}
                     onClick={() => {
                       const note = reason.trim();
                       void onRun(async () => {
                         if (rejecting) await rejectOrder(shopId, o.id, note);
-                        else if (cancelling) await cancelOrder(shopId, o.id, note || undefined);
+                        else if (cancelling) await cancelOrder(shopId, o.id, note);
                         else
-                          await patchDelivery(shopId, o.id, {
-                            status: "FAILED",
-                            ...(note ? { failReason: note } : {}),
-                          });
+                          await patchDelivery(shopId, o.id, { status: "FAILED", failReason: note });
                         closeReasons();
                       });
                     }}
@@ -525,11 +638,45 @@ function OrderDetailView({
 
           {/* The API 400s on dispatch without a rider, so this is stated, not discovered. */}
           {needsRiderToDispatch && (
-            <p className="mt-3 flex items-center gap-1.5 border-t border-ink-100 pt-3 text-sm text-ink-500">
+            <p className="border-t border-ink-100 bg-amber-50 px-4 py-3 text-sm text-amber-800 sm:px-5">
               <Info className="h-4 w-4 shrink-0 text-ink-400" />
               Packed and ready. Assign a rider below before handing this order over.
             </p>
           )}
+        </Card>
+      )}
+
+      {returnConfirmation && (
+        <Card className="mb-4 border-amber-200 bg-amber-50/50 p-4 sm:p-5">
+          <h2 className="flex items-center gap-2 text-sm font-semibold text-ink-900">
+            <PackageCheck className="h-4 w-4 text-amber-700" /> Confirm return to shop
+          </h2>
+          <p className="mt-1 text-sm text-ink-600">
+            Do this only after the parcel is in the shop. The rider remains unavailable until you
+            confirm receipt.
+          </p>
+          <textarea
+            rows={2}
+            maxLength={500}
+            value={returnNote}
+            onChange={(event) => setReturnNote(event.target.value)}
+            placeholder="e.g. All items returned sealed and undamaged"
+            className="mt-3 w-full rounded-xl border border-amber-200 bg-white p-3 text-sm outline-none focus:border-amber-400"
+          />
+          <Button
+            className="mt-3 w-full sm:w-auto"
+            disabled={busy || returnNote.trim().length < 3}
+            onClick={() =>
+              void onRun(() =>
+                patchDelivery(shopId, o.id, {
+                  status: "RETURNED_TO_SHOP",
+                  returnNote: returnNote.trim(),
+                }),
+              )
+            }
+          >
+            {busy ? <Spinner /> : <PackageCheck className="h-4 w-4" />} Parcel received
+          </Button>
         </Card>
       )}
       {/*
@@ -538,7 +685,7 @@ function OrderDetailView({
         itself — so this asks the one question it needs and never an amount.
       */}
       {handover && (
-        <Card className="mb-4">
+        <Card className="mb-4 p-4 sm:p-5">
           <h2 className="flex items-center gap-2 text-sm font-semibold text-ink-900">
             <ShieldCheck className="h-4 w-4 text-green-600" /> Confirm handover
           </h2>
@@ -563,11 +710,11 @@ function OrderDetailView({
               value={podNote}
               onChange={(e) => setPodNote(e.target.value)}
               maxLength={280}
-              placeholder="Handover note (optional)"
+              placeholder="Who received it and where? (required)"
               className="h-10 flex-1 rounded-xl border border-ink-200 px-3 text-sm outline-none focus:border-crimson-300"
             />
             <Button
-              disabled={busy}
+              disabled={busy || podNote.trim().length < 3 || (o.isCod && !codCollected)}
               onClick={() =>
                 void onRun(() =>
                   patchDelivery(shopId, o.id, {
@@ -581,6 +728,10 @@ function OrderDetailView({
               {busy ? <Spinner /> : <Check className="h-4 w-4" />} Mark delivered
             </Button>
           </div>
+          <p className="mt-2 text-xs text-ink-500">
+            Record a factual handover note. A consented photo, when present, is added by the
+            assigned rider and appears below after delivery.
+          </p>
         </Card>
       )}
       {/*
@@ -590,8 +741,17 @@ function OrderDetailView({
         reason above instead of a stepper.
       */}
       {!closed && (
-        <Card className="mb-4 overflow-x-auto">
-          <ol className="gp-scroll flex min-w-max items-start gap-1">
+        <Card className="mb-4 overflow-x-auto p-4 sm:p-5">
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <h2 className="text-sm font-semibold text-ink-900">Fulfilment progress</h2>
+              <p className="text-xs text-ink-500">A complete audit trail from order to handover</p>
+            </div>
+            <span className="rounded-full bg-ink-100 px-2.5 py-1 text-xs font-semibold text-ink-600">
+              Step {step + 1} of {ORDER_STEPS.length}
+            </span>
+          </div>
+          <ol className="gp-scroll flex min-w-[650px] items-start">
             {ORDER_STEPS.map((s, i) => {
               const done = i <= step;
               const at = stampFor(o, s.status);
@@ -600,7 +760,7 @@ function OrderDetailView({
                   <div className="flex w-24 flex-col items-center text-center">
                     <span
                       className={cn(
-                        "inline-flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold",
+                        "inline-flex h-9 w-9 items-center justify-center rounded-full text-xs font-semibold ring-4 ring-white",
                         done ? "bg-[#c02636] text-white" : "bg-ink-100 text-ink-400",
                       )}
                     >
@@ -608,7 +768,7 @@ function OrderDetailView({
                     </span>
                     <span
                       className={cn(
-                        "mt-1.5 text-xs font-medium",
+                        "mt-2 text-xs font-semibold",
                         done ? "text-ink-900" : "text-ink-400",
                       )}
                     >
@@ -619,7 +779,7 @@ function OrderDetailView({
                   {i < ORDER_STEPS.length - 1 && (
                     <span
                       className={cn(
-                        "mt-3.5 h-0.5 w-6 rounded-full",
+                        "mt-[18px] h-0.5 w-10 flex-1 rounded-full",
                         i < step ? "bg-[#c02636]" : "bg-ink-100",
                       )}
                       aria-hidden
@@ -634,7 +794,7 @@ function OrderDetailView({
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
           {/* Snapshot lines: the name and unit as they were at checkout. */}
-          <Card>
+          <Card className="p-4 sm:p-5">
             <h2 className="text-sm font-semibold text-ink-900">
               Items ({o.itemCount} {o.itemCount === 1 ? "unit" : "units"})
             </h2>
@@ -670,7 +830,7 @@ function OrderDetailView({
 
           {/* The customer's own note, if they left one. */}
           {o.note && (
-            <Card>
+            <Card className="p-4 sm:p-5">
               <h2 className="text-sm font-semibold text-ink-900">Note from the customer</h2>
               <p className="mt-1.5 text-sm text-ink-700">{o.note}</p>
             </Card>
@@ -680,7 +840,7 @@ function OrderDetailView({
             API does not join the actor's user record here — so this says what
             happened and when, and does not guess who.
           */}
-          <Card>
+          <Card className="p-4 sm:p-5">
             <h2 className="text-sm font-semibold text-ink-900">History</h2>
             {o.timeline.length === 0 ? (
               <p className="mt-1.5 text-sm text-ink-500">Nothing recorded on this order yet.</p>
@@ -688,7 +848,10 @@ function OrderDetailView({
               <ol className="mt-2.5 space-y-3">
                 {o.timeline.map((e) => (
                   <li key={e.id} className="flex gap-3">
-                    <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-crimson-300" aria-hidden />
+                    <span
+                      className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-crimson-300"
+                      aria-hidden
+                    />
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-ink-900">{e.label}</p>
                       {e.note && <p className="text-sm text-ink-600">{e.note}</p>}
@@ -709,7 +872,7 @@ function OrderDetailView({
             seller order carries no customer relation — so they are exactly what
             the shop is allowed to see, and the buttons dial the real number.
           */}
-          <Card>
+          <Card className="p-4 sm:p-5">
             <h2 className="flex items-center gap-2 text-sm font-semibold text-ink-900">
               <User className="h-4 w-4 text-ink-400" /> Customer
             </h2>
@@ -719,12 +882,18 @@ function OrderDetailView({
               <Button variant="outline" size="sm" href={`tel:${o.recipientPhone}`}>
                 <Phone className="h-4 w-4" /> Call
               </Button>
-              <Button variant="ghost" size="sm" href={`sms:${o.recipientPhone}`}>
-                <MessageCircle className="h-4 w-4" /> Message
-              </Button>
+              {shopId && canInShop(shopId, "messages.respond") && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  href={`/messages?shopId=${encodeURIComponent(shopId)}&orderId=${encodeURIComponent(o.id)}`}
+                >
+                  <MessageCircle className="h-4 w-4" /> Message securely
+                </Button>
+              )}
             </div>
           </Card>
-          <Card>
+          <Card className="p-4 sm:p-5">
             <h2 className="flex items-center gap-2 text-sm font-semibold text-ink-900">
               <MapPin className="h-4 w-4 text-ink-400" /> Where it goes
             </h2>
@@ -740,7 +909,7 @@ function OrderDetailView({
             )}
           </Card>
 
-          <Card>
+          <Card className="p-4 sm:p-5">
             <h2 className="flex items-center gap-2 text-sm font-semibold text-ink-900">
               <Wallet className="h-4 w-4 text-ink-400" /> Payment
             </h2>
@@ -760,7 +929,9 @@ function OrderDetailView({
             {o.coupon && (
               <p className="mt-1 text-xs text-ink-500">
                 Coupon {o.coupon.code} ·{" "}
-                {o.coupon.type === "PERCENT" ? `${o.coupon.value}% off` : `${rs(o.coupon.value)} off`}
+                {o.coupon.type === "PERCENT"
+                  ? `${o.coupon.value}% off`
+                  : `${rs(o.coupon.value)} off`}
               </p>
             )}
           </Card>
@@ -769,7 +940,7 @@ function OrderDetailView({
             `GET /seller/shops/:shopId/riders`. Never a made-up name — a rider
             account with no name yet shows their phone number instead.
           */}
-          <Card>
+          <Card className="p-4 sm:p-5">
             <h2 className="flex items-center gap-2 text-sm font-semibold text-ink-900">
               <Bike className="h-4 w-4 text-ink-400" /> Delivery
             </h2>
@@ -838,7 +1009,11 @@ function OrderDetailView({
                     >
                       <option value="">Choose a rider</option>
                       {riders.map((r) => (
-                        <option key={r.id} value={r.id}>
+                        <option
+                          key={r.id}
+                          value={r.id}
+                          disabled={r.status !== "ONLINE" || r.activeDeliveries > 0}
+                        >
                           {r.name} · {riderStatusLabel(r.status)}
                           {r.activeDeliveries > 0 ? ` · ${r.activeDeliveries} on the go` : ""}
                         </option>
@@ -846,7 +1021,7 @@ function OrderDetailView({
                     </select>
                     <Button
                       size="sm"
-                      disabled={busy || riderId === ""}
+                      disabled={busy || !selectedRiderAvailable}
                       onClick={() =>
                         void onRun(async () => {
                           await assignRider(shopId, o.id, riderId);
@@ -854,7 +1029,12 @@ function OrderDetailView({
                         })
                       }
                     >
-                      {busy ? <Spinner /> : <Bike className="h-4 w-4" />} {o.rider ? "Reassign" : "Assign"}
+                      {busy ? <Spinner /> : <Bike className="h-4 w-4" />}{" "}
+                      {o.deliveryStatus === "FAILED" || o.deliveryStatus === "RETURNED_TO_SHOP"
+                        ? "Assign reattempt"
+                        : o.rider
+                          ? "Reassign"
+                          : "Assign"}
                     </Button>
                   </div>
                 )}
@@ -866,9 +1046,15 @@ function OrderDetailView({
                 Handover note: {o.podNote}
               </p>
             )}
+            {o.hasProofPhoto && <DeliveryProofPhoto shopId={shopId} orderId={o.id} />}
             {o.failReason && (
               <p className="mt-3 border-t border-ink-100 pt-3 text-sm text-[#c02636]">
                 Delivery failed: {o.failReason}
+              </p>
+            )}
+            {o.returnNote && (
+              <p className="mt-3 border-t border-ink-100 pt-3 text-sm text-amber-900">
+                Returned parcel check: {o.returnNote}
               </p>
             )}
           </Card>
@@ -886,7 +1072,11 @@ function OrderDetailView({
  */
 const REJECT_REASONS = ["Out of stock", "Shop is closed", "Can’t deliver to this area"];
 const CANCEL_REASONS = ["Customer asked to cancel", "Item unavailable", "Address unreachable"];
-const FAIL_REASONS = ["Nobody at the address", "Customer refused the order", "Couldn’t find the address"];
+const FAIL_REASONS = [
+  "Nobody at the address",
+  "Customer refused the order",
+  "Couldn’t find the address",
+];
 
 /** `PaymentStatus`, in words. Indexed by string, so a new enum value falls back. */
 const PAYMENT_STATUS_LABELS: Record<string, string> = {

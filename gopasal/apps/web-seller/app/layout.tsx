@@ -1,29 +1,10 @@
 import type { Metadata, Viewport } from "next";
-import { Baloo_2, Inter, Hind } from "next/font/google";
 import "./globals.css";
+import "maplibre-gl/dist/maplibre-gl.css";
 import { AuthProvider } from "@/components/auth-provider";
 import { ShopProvider } from "@/components/shop-provider";
 import { SellerProvider } from "@/components/providers";
-import { Splash } from "@/components/Splash";
 import { OfflineWatcher } from "@/components/OfflineWatcher";
-
-const display = Baloo_2({
-  subsets: ["latin"],
-  weight: ["500", "600", "700", "800"],
-  variable: "--font-display",
-  display: "swap",
-});
-const body = Inter({
-  subsets: ["latin"],
-  variable: "--font-body",
-  display: "swap",
-});
-const deva = Hind({
-  subsets: ["devanagari"],
-  weight: ["400", "500", "600", "700"],
-  variable: "--font-devanagari",
-  display: "swap",
-});
 
 export const metadata: Metadata = {
   title: {
@@ -46,9 +27,8 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${display.variable} ${body.variable} ${deva.variable}`}>
+    <html lang="en">
       <body>
-        <Splash />
         {/* Provider order is a dependency chain, not a style choice.
             AuthProvider: who is signed in, and what the API says they may do.
             ShopProvider: reads that session to load the seller's real shops.

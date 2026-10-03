@@ -1,4 +1,4 @@
-import type { DeliveryStatus, OrderStatus } from '@prisma/client';
+import type { DeliveryStatus, OrderStatus } from "@prisma/client";
 
 /**
  * Domain events emitted onto the app-wide EventEmitter2 bus. Orders/delivery
@@ -6,17 +6,18 @@ import type { DeliveryStatus, OrderStatus } from '@prisma/client';
  * registry so producers and consumers can't drift on the event name/shape.
  */
 export const EVENTS = {
-  ORDER_PLACED: 'order.placed',
-  ORDER_STATUS_CHANGED: 'order.status_changed',
-  DELIVERY_ASSIGNED: 'delivery.assigned',
-  DELIVERY_STATUS_CHANGED: 'delivery.status_changed',
-  RIDER_LOCATION: 'rider.location',
-  APPLICATION_SUBMITTED: 'application.submitted',
-  APPLICATION_CLAIMED: 'application.claimed',
-  APPLICATION_CHANGES_REQUESTED: 'application.changes_requested',
-  APPLICATION_APPROVED: 'application.approved',
-  APPLICATION_REJECTED: 'application.rejected',
-  APPLICATION_WITHDRAWN: 'application.withdrawn',
+  ORDER_PLACED: "order.placed",
+  ORDER_STATUS_CHANGED: "order.status_changed",
+  DELIVERY_ASSIGNED: "delivery.assigned",
+  DELIVERY_STATUS_CHANGED: "delivery.status_changed",
+  RIDER_LOCATION: "rider.location",
+  APPLICATION_SUBMITTED: "application.submitted",
+  APPLICATION_CLAIMED: "application.claimed",
+  APPLICATION_CHANGES_REQUESTED: "application.changes_requested",
+  APPLICATION_APPROVED: "application.approved",
+  APPLICATION_REJECTED: "application.rejected",
+  APPLICATION_WITHDRAWN: "application.withdrawn",
+  CONVERSATION_MESSAGE_CREATED: "conversation.message_created",
 } as const;
 
 export interface OrderPlacedEvent {
@@ -54,7 +55,8 @@ export interface DeliveryStatusChangedEvent {
   from: DeliveryStatus;
   to: DeliveryStatus;
   /** Who moved it — the rider on the road, or the shop from the console. */
-  actor: 'RIDER' | 'SHOP';
+  actor: "RIDER" | "SHOP";
+  actorId?: string;
 }
 
 export interface RiderLocationEvent {
@@ -66,6 +68,17 @@ export interface RiderLocationEvent {
   speed?: number;
   accuracy?: number;
   at: string;
+}
+
+export interface ConversationMessageCreatedEvent {
+  conversationId: string;
+  shopId: string;
+  customerId: string;
+  messageId: string;
+  authorId: string;
+  sender: "CUSTOMER" | "SHOP" | "SYSTEM";
+  body: string;
+  createdAt: string;
 }
 
 /**

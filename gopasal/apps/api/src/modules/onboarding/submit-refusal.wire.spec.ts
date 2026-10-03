@@ -61,8 +61,14 @@ function draft(overrides: Partial<AppRow> = {}): AppRow {
     contactPhone: '9840000009',
     area: 'Baneshwor, Kathmandu',
     fullAddress: 'Ward 10, New Baneshwor, Kathmandu',
+    lat: 27.6939,
+    lng: 85.3395,
+    locationCapturedAt: new Date('2026-09-09T10:00:00.000Z'),
     ownerName: 'E2E Verification Owner',
     citizenshipNo: '12-34-56-78901',
+    registrationNo: 'REG-12345',
+    panNo: '123456789',
+    vatNo: null,
     payoutMethod: 'BANK',
     bankName: 'Nabil Bank',
     bankAccountNo: '01234567890123',
@@ -92,6 +98,9 @@ function fakePrisma(app: AppRow, documents: DocRow[]): PrismaService {
                 return projected;
               }),
         ),
+    },
+    category: {
+      findUnique: () => Promise.resolve({ slug: 'grocery' }),
     },
   } as unknown as PrismaService;
 }
@@ -164,18 +173,22 @@ describe('submit refusal · what the client actually receives', () => {
     assert.equal(status, 400);
     assert.deepEqual([...(body.missingDocuments as string[])].sort(), [
       'BANK_PROOF',
+      'BUSINESS_LICENCE',
       'CITIZENSHIP_BACK',
       'CITIZENSHIP_FRONT',
+      'PAN_CERTIFICATE',
       'SHOP_PHOTO',
     ]);
     assert.deepEqual(body.missing, []);
     assert.equal(body.message, 'Some required documents are still missing.');
   });
 
-  it('names only BANK_PROOF when the KYC three are there and the payout is a bank', async () => {
+  it('names only BANK_PROOF when the required KYC papers are there and the payout is a bank', async () => {
     const { body } = await submitAndSerialise(draft(), [
       doc('CITIZENSHIP_FRONT'),
       doc('CITIZENSHIP_BACK'),
+      doc('BUSINESS_LICENCE'),
+      doc('PAN_CERTIFICATE'),
       doc('SHOP_PHOTO'),
     ]);
 
@@ -185,7 +198,12 @@ describe('submit refusal · what the client actually receives', () => {
   it('does not demand a bank proof from a wallet payout', async () => {
     const { body } = await submitAndSerialise(
       draft({ payoutMethod: 'ESEWA', walletNumber: '9840000009' }),
-      [doc('CITIZENSHIP_FRONT'), doc('CITIZENSHIP_BACK')],
+      [
+        doc('CITIZENSHIP_FRONT'),
+        doc('CITIZENSHIP_BACK'),
+        doc('BUSINESS_LICENCE'),
+        doc('PAN_CERTIFICATE'),
+      ],
     );
 
     assert.deepEqual(body.missingDocuments, ['SHOP_PHOTO']);
@@ -195,6 +213,8 @@ describe('submit refusal · what the client actually receives', () => {
     const { body } = await submitAndSerialise(draft(), [
       doc('CITIZENSHIP_FRONT'),
       doc('CITIZENSHIP_BACK'),
+      doc('BUSINESS_LICENCE'),
+      doc('PAN_CERTIFICATE'),
       doc('SHOP_PHOTO', 'REJECTED'),
       doc('BANK_PROOF'),
     ]);
@@ -206,7 +226,7 @@ describe('submit refusal · what the client actually receives', () => {
     const { body } = await submitAndSerialise(draft({ area: null, ownerName: '   ' }), []);
 
     assert.deepEqual([...(body.missing as string[])].sort(), ['area', 'ownerName']);
-    assert.equal((body.missingDocuments as string[]).length, 4);
+    assert.equal((body.missingDocuments as string[]).length, 6);
     assert.equal(body.message, 'Some required details and documents are still missing.');
   });
 

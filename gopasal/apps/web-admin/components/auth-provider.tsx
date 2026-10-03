@@ -74,7 +74,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const stored = getSession();
     setLocalSession(stored);
     if (!stored) setStatus("anonymous");
-    const stopSubscribe = subscribe(setLocalSession);
+    let hasSession = Boolean(stored);
+    const stopSubscribe = subscribe((next) => {
+      const hadSession = hasSession;
+      hasSession = Boolean(next);
+      setLocalSession(next);
+      if (!next) {
+        setMe(null);
+        setError(null);
+        setStatus("anonymous");
+      } else if (!hadSession) {
+        setStatus("loading");
+      }
+    });
     const stopStorage = watchStorage();
     return () => {
       stopSubscribe();
@@ -111,7 +123,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const sessionKey = session?.accessToken ?? null;
+  // A reloaded browser session intentionally contains no readable bearer token;
+  // its user identity is enough to trigger the HttpOnly-cookie refresh.
+  const sessionKey = session?.user.id ?? null;
   React.useEffect(() => {
     if (!sessionKey) return;
     const controller = new AbortController();

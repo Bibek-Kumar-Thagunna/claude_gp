@@ -3,7 +3,7 @@ import { AuthForm } from "@/components/AuthForm";
 
 export const metadata: Metadata = {
   title: "Log in",
-  description: "Log in to GoPasal to order from local shops, track deliveries and chat with shopkeepers.",
+  description: "Log in to GoPasal to order from local shops, track deliveries and contact support.",
 };
 
 export default function LoginPage() {

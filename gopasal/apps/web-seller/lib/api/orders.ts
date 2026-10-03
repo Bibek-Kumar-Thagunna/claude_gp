@@ -40,19 +40,13 @@
  */
 
 import type { Paginated } from "@gopasal/api-client";
-import { authedRequest } from "./client";
+import { authedBlob, authedRequest } from "./client";
 
 /* -------------------------------------------------------------- Enumerations */
 
 /** `OrderStatus` in `prisma/schema.prisma`. Terminal: DELIVERED/CANCELLED/REJECTED. */
 export type OrderStatusWire =
-  | "PLACED"
-  | "ACCEPTED"
-  | "PACKED"
-  | "OUT_FOR_DELIVERY"
-  | "DELIVERED"
-  | "CANCELLED"
-  | "REJECTED";
+  "PLACED" | "ACCEPTED" | "PACKED" | "OUT_FOR_DELIVERY" | "DELIVERED" | "CANCELLED" | "REJECTED";
 
 export type PaymentMethodWire = "COD" | "ESEWA" | "KHALTI";
 export type PaymentStatusWire = "PENDING" | "PAID" | "FAILED" | "REFUNDED";
@@ -63,7 +57,9 @@ export type DeliveryStatusWire =
   | "PICKED_UP"
   | "EN_ROUTE"
   | "DELIVERED"
-  | "FAILED";
+  | "FAILED"
+  | "RETURNING_TO_SHOP"
+  | "RETURNED_TO_SHOP";
 
 export type RiderStatusWire = "OFFLINE" | "ONLINE" | "ON_DELIVERY";
 export type VehicleTypeWire = "BICYCLE" | "MOTORBIKE" | "SCOOTER" | "WALK" | "VAN";
@@ -184,8 +180,11 @@ export type DeliveryWire = {
   deliveredAt: string | null;
   failedAt: string | null;
   failReason: string | null;
+  returnStartedAt: string | null;
+  returnedAt: string | null;
+  returnNote: string | null;
   podNote: string | null;
-  podImageUrl: string | null;
+  hasProofPhoto: boolean;
   codCollected: boolean;
   codAmount: number;
   createdAt: string;
@@ -198,6 +197,11 @@ export type SellerOrderListItemWire = OrderRowWire & {
   items: OrderItemWire[];
   delivery: DeliveryWire | null;
 };
+
+export const deliveryProof = (shopId: string, orderId: string) =>
+  authedBlob(
+    `/seller/shops/${encodeURIComponent(shopId)}/orders/${encodeURIComponent(orderId)}/delivery-proof`,
+  );
 
 /**
  * `GET /seller/shops/:shopId/orders/:orderId` (`ORDER_DETAIL_INCLUDE` plus the
@@ -426,7 +430,6 @@ export function mergeOrderSummaries(parts: OrderQueueSummaryWire[]): OrderQueueS
   );
 }
 
-
 /** One order in full. 404s if the order belongs to a different shop. */
 export function fetchShopOrder(
   shopId: string,
@@ -441,10 +444,9 @@ export function fetchShopOrder(
 
 /** The shop's own rider roster (`delivery.view`). Self-delivery, so these are the shop's people. */
 export function listShopRiders(shopId: string, signal?: AbortSignal): Promise<ShopRiderWire[]> {
-  return authedRequest<ShopRiderWire[]>(
-    `/seller/shops/${encodeURIComponent(shopId)}/riders`,
-    { signal },
-  );
+  return authedRequest<ShopRiderWire[]>(`/seller/shops/${encodeURIComponent(shopId)}/riders`, {
+    signal,
+  });
 }
 
 /* ------------------------------------------------------------------- Actions */
@@ -459,7 +461,7 @@ export function listShopRiders(shopId: string, signal?: AbortSignal): Promise<Sh
 function transition(
   shopId: string,
   orderId: string,
-  action: "accept" | "pack" | "dispatch" | "cancel",
+  action: "accept" | "pack" | "dispatch",
   note?: string,
   signal?: AbortSignal,
 ): Promise<OrderRowWire> {
@@ -501,7 +503,12 @@ export function packOrder(shopId: string, orderId: string, note?: string, signal
  * `orders.dispatch`. Legal from `PACKED` only, and 400s with
  * `'Assign a rider before dispatching'` when the delivery has no rider.
  */
-export function dispatchOrder(shopId: string, orderId: string, note?: string, signal?: AbortSignal) {
+export function dispatchOrder(
+  shopId: string,
+  orderId: string,
+  note?: string,
+  signal?: AbortSignal,
+) {
   return transition(shopId, orderId, "dispatch", note, signal);
 }
 
@@ -509,14 +516,18 @@ export function dispatchOrder(shopId: string, orderId: string, note?: string, si
  * `orders.cancel`. Legal from `PLACED`, `ACCEPTED` or `PACKED` — never after
  * dispatch, so the button must disappear once the order is out.
  */
-export function cancelOrder(shopId: string, orderId: string, note?: string, signal?: AbortSignal) {
-  return transition(shopId, orderId, "cancel", note, signal);
+export function cancelOrder(shopId: string, orderId: string, reason: string, signal?: AbortSignal) {
+  return authedRequest<OrderRowWire>(
+    `/seller/shops/${encodeURIComponent(shopId)}/orders/${encodeURIComponent(orderId)}/cancel`,
+    { method: "POST", body: { reason }, signal },
+  );
 }
 
 /**
  * `delivery.assign`. Assigns one of the shop's riders and moves the delivery to
- * `ASSIGNED`. Rejects a rider belonging to another shop (404), an order already
- * delivered or cancelled, and a delivery past `ASSIGNED`.
+ * `ASSIGNED`. Rejects a rider belonging to another shop (404), an offline or busy
+ * rider, an order already delivered/cancelled, and a live leg past `ASSIGNED`.
+ * A `FAILED` leg may be assigned as an audited reattempt.
  *
  * Answers with the bare `Delivery` row — again no relations, so refetch.
  */
@@ -556,15 +567,16 @@ export function unassignRider(
  *
  * These four keys are the whole body. `DeliveryStatusDto` runs under
  * `forbidNonWhitelisted`, so a fifth key is a 400, not an ignored field — which is
- * why there is no `podImageUrl` here even though the *response* carries one. That
- * column exists for a rider app that can upload; this console has no delivery upload
- * route to give it a value, and a string field would only invite one to be typed.
+ * why there is no `podImageUrl` here. The response exposes only
+ * `hasProofPhoto`; authenticated blob endpoints stream the image after checking
+ * customer, shop, rider or platform scope, without disclosing its storage key.
  */
 export type DeliveryPatchBody = {
   status: DeliveryStatusWire;
   podNote?: string;
   codCollected?: boolean;
   failReason?: string;
+  returnNote?: string;
 };
 
 export function patchDelivery(

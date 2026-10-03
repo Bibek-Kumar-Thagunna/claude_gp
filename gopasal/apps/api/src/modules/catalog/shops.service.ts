@@ -6,6 +6,11 @@ import {
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { paginate, type PaginationDto } from '../../common/dto/pagination.dto';
+import {
+  DELIVERABLE_PRODUCT_WHERE,
+  STOREFRONT_SHOP_WHERE,
+  storefrontReadiness,
+} from './storefront-eligibility';
 
 export interface CreateShopInput {
   name: string;
@@ -17,6 +22,9 @@ export interface CreateShopInput {
   fullAddress?: string;
   lat?: number;
   lng?: number;
+  locationAccuracyM?: number;
+  locationCapturedAt?: Date;
+  locationCaptureMethod?: string;
   deliveryRadiusKm?: number;
   emoji?: string;
   hours?: string;
@@ -29,8 +37,8 @@ export class ShopsService {
 
   // ── public storefront ────────────────────────────────────────────────
   async listPublic(pagination: PaginationDto, categoryId?: string) {
-    const where = {
-      status: 'ACTIVE' as const,
+    const where: Prisma.ShopWhereInput = {
+      ...STOREFRONT_SHOP_WHERE,
       ...(categoryId ? { categoryId } : {}),
       ...(pagination.q
         ? { OR: [{ name: { contains: pagination.q, mode: 'insensitive' as const } }, { area: { contains: pagination.q, mode: 'insensitive' as const } }] }
@@ -42,7 +50,10 @@ export class ShopsService {
         skip: pagination.skip,
         take: pagination.limit,
         orderBy: [{ ratingAvg: 'desc' }, { ratingCount: 'desc' }],
-        include: { category: true, _count: { select: { products: true } } },
+        include: {
+          category: true,
+          _count: { select: { products: { where: DELIVERABLE_PRODUCT_WHERE } } },
+        },
       }),
       this.prisma.shop.count({ where }),
     ]);
@@ -50,14 +61,16 @@ export class ShopsService {
   }
 
   async getBySlug(slug: string) {
-    const shop = await this.prisma.shop.findUnique({
-      where: { slug },
+    const shop = await this.prisma.shop.findFirst({
+      where: { slug, ...STOREFRONT_SHOP_WHERE },
       include: {
         category: true,
-        _count: { select: { products: { where: { isActive: true } }, reviews: true } },
+        _count: {
+          select: { products: { where: DELIVERABLE_PRODUCT_WHERE }, reviews: true },
+        },
       },
     });
-    if (!shop || shop.status !== 'ACTIVE') throw new NotFoundException('Shop not found');
+    if (!shop) throw new NotFoundException('Shop not found');
     return shop;
   }
 
@@ -100,6 +113,9 @@ export class ShopsService {
         fullAddress: input.fullAddress,
         lat: input.lat,
         lng: input.lng,
+        locationAccuracyM: input.locationAccuracyM,
+        locationCapturedAt: input.locationCapturedAt,
+        locationCaptureMethod: input.locationCaptureMethod,
         deliveryRadiusKm: input.deliveryRadiusKm ?? 3,
         hours: input.hours,
         soloMode: input.soloMode ?? false,
@@ -130,7 +146,22 @@ export class ShopsService {
         role: { select: { name: true, isPrivileged: true } },
       },
     });
-    return memberships.map((m) => ({ ...m.shop, myRole: m.role }));
+    const counts = memberships.length
+      ? await this.prisma.product.groupBy({
+          by: ['shopId'],
+          where: { shopId: { in: memberships.map((m) => m.shop.id) }, ...DELIVERABLE_PRODUCT_WHERE },
+          _count: { _all: true },
+        })
+      : [];
+    const byShop = new Map(counts.map((row) => [row.shopId, row._count._all]));
+    return memberships.map((m) => {
+      const deliverableProductCount = byShop.get(m.shop.id) ?? 0;
+      return {
+        ...m.shop,
+        myRole: m.role,
+        storefront: storefrontReadiness(m.shop, deliverableProductCount),
+      };
+    });
   }
 
   async getForManage(shopId: string) {
@@ -139,7 +170,10 @@ export class ShopsService {
       include: { category: true, _count: { select: { products: true, orders: true, memberships: true } } },
     });
     if (!shop) throw new NotFoundException('Shop not found');
-    return shop;
+    const deliverableProductCount = await this.prisma.product.count({
+      where: { shopId, ...DELIVERABLE_PRODUCT_WHERE },
+    });
+    return { ...shop, storefront: storefrontReadiness(shop, deliverableProductCount) };
   }
 
   async update(shopId: string, input: Partial<CreateShopInput> & { isOpen?: boolean; hours?: string; minOrder?: number; soloMode?: boolean }) {

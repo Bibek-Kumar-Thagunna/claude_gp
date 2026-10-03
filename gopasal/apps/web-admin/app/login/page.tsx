@@ -42,7 +42,7 @@ import { cn } from "@/lib/cn";
  * by panel, this screen says so and signs them back out.
  */
 
-const CODE_LENGTH = 4;
+const CODE_LENGTH = 6;
 const LANDING = "/dashboard";
 
 export default function LoginPage() {
@@ -59,6 +59,7 @@ export default function LoginPage() {
   const [challenge, setChallenge] = React.useState<{
     delivered: boolean;
     expiresInSeconds: number;
+    developmentCode?: string;
   } | null>(null);
   const [cooldown, setCooldown] = React.useState(0);
 
@@ -67,7 +68,10 @@ export default function LoginPage() {
 
   // Already signed in with real platform standing — nothing to do here.
   React.useEffect(() => {
-    if (status === "authenticated" && me && isStaff) router.replace(LANDING);
+    const returnTo = readSafeReturnTo();
+    if (status === "authenticated" && me && (isStaff || isInviteReturnTo(returnTo))) {
+      router.replace(returnTo ?? LANDING);
+    }
   }, [status, me, isStaff, router]);
 
   // The API owns the resend cooldown and tells us how long it is; the button
@@ -85,7 +89,11 @@ export default function LoginPage() {
       setNotStaff(false);
       try {
         const result = await requestOtp(phone);
-        setChallenge({ delivered: result.delivered, expiresInSeconds: result.expiresInSeconds });
+        setChallenge({
+          delivered: result.delivered,
+          expiresInSeconds: result.expiresInSeconds,
+          developmentCode: result.developmentCode,
+        });
         setCooldown(result.cooldownSeconds);
         setStep("otp");
         if (resend) setCode(Array.from({ length: CODE_LENGTH }, () => ""));
@@ -118,14 +126,19 @@ export default function LoginPage() {
       const next = await signIn(result.tokens, result.user);
       // `signIn` returns null when `/auth/me` could not be read; the provider is
       // holding the error and `RequireAuth` will surface it, so still move on.
-      if (next && !next.access.superAdmin && next.access.platform.length === 0) {
+      if (
+        next &&
+        !next.access.superAdmin &&
+        next.access.platform.length === 0 &&
+        !isInviteReturnTo(readSafeReturnTo())
+      ) {
         setNotStaff(true);
         await signOut();
         setCode(Array.from({ length: CODE_LENGTH }, () => ""));
         setStep("phone");
         return;
       }
-      router.replace(LANDING);
+      router.replace(readSafeReturnTo() ?? LANDING);
     } catch (err) {
       setError(
         err instanceof ApiError
@@ -184,15 +197,15 @@ export default function LoginPage() {
           </span>
           <h1 className="mt-5 text-4xl font-bold leading-tight">The platform control room.</h1>
           <p className="mt-4 text-lg text-white/85">
-            Approve shops, keep the marketplace honest, settle cash, and publish policy — every action
-            recorded, every permission explicit.
+            Review shops, manage marketplace access, handle customer support, and inspect live metrics —
+            with explicit permissions and audited mutations.
           </p>
           <ul className="mt-8 space-y-4">
             {[
               { icon: ShieldCheck, text: "Default-deny permissions — staff see only their own remit" },
-              { icon: Scale, text: "Disputes, fraud and moderation queues in one place" },
-              { icon: KeyRound, text: "Build your own roles, granular to a single action" },
-              { icon: ScrollText, text: "Tamper-evident audit trail on every change" },
+              { icon: Scale, text: "Shop, user and support operations in one place" },
+              { icon: KeyRound, text: "Granular platform roles enforced on protected actions" },
+              { icon: ScrollText, text: "Append-only application audit trail for management actions" },
             ].map(({ icon: Icon, text }) => (
               <li key={text} className="flex items-center gap-3 text-white/90">
                 <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/15">
@@ -241,8 +254,8 @@ export default function LoginPage() {
               <div className="mt-6">
                 <InlineWarning message="That number signed in, but the account has no GoPasal platform role — so there is nothing in this console for it.">
                   <p className="mt-1 text-xs">
-                    A Super Admin can grant one under Roles &amp; permissions. If you were looking for
-                    the seller console, sign in there instead.
+                    Ask a Super Admin to verify your platform membership. If you were looking for the
+                    seller console, sign in there instead.
                   </p>
                 </InlineWarning>
               </div>
@@ -303,8 +316,8 @@ export default function LoginPage() {
                 </Button>
 
                 <p className="rounded-xl bg-ink-50 px-3.5 py-3 text-xs leading-relaxed text-ink-500">
-                  Platform accounts are created by a Super Admin. If you can’t sign in, ask them to check
-                  your role under Roles &amp; permissions.
+                  Platform accounts are created by a Super Admin. If you can’t sign in, ask them to
+                  verify your platform membership.
                 </p>
               </form>
             ) : (
@@ -341,9 +354,16 @@ export default function LoginPage() {
                 </div>
 
                 {challenge && !challenge.delivered && (
-                  <InlineNotice message="SMS delivery is switched off in this environment, so the code is printed in the API log instead of being texted to you.">
+                  <InlineNotice message="Local development uses a non-delivering SMS transport.">
                     <p className="mt-1 text-xs text-ink-500">
-                      It expires in {Math.round(challenge.expiresInSeconds / 60)} minutes.
+                      {challenge.developmentCode ? (
+                        <>
+                          Development OTP: <strong className="font-mono text-ink-900">{challenge.developmentCode}</strong>. It still expires and is verified normally.
+                        </>
+                      ) : (
+                        <>Read the code from the API log.</>
+                      )}{" "}
+                      Expires in {Math.round(challenge.expiresInSeconds / 60)} minutes.
                     </p>
                   </InlineNotice>
                 )}
@@ -394,11 +414,27 @@ export default function LoginPage() {
 
             <p className="mt-8 flex items-center justify-center gap-1.5 text-center text-xs text-ink-400">
               <ShieldCheck className="h-3.5 w-3.5" />
-              Sign-ins and every console action are written to the audit log.
+              Management mutations are written to the application audit log.
             </p>
           </motion.div>
         </div>
       </div>
     </div>
   );
+}
+
+/** Accept only same-origin internal paths; platform standing is checked separately. */
+function readSafeReturnTo(): string | null {
+  if (typeof window === "undefined") return null;
+  const value = new URLSearchParams(window.location.search).get("returnTo");
+  if (!value || !value.startsWith("/") || value.startsWith("//") || value.includes("\\")) return null;
+  try {
+    const parsed = new URL(value, window.location.origin);
+    if (parsed.origin !== window.location.origin || parsed.pathname === "/login") return null;
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch { return null; }
+}
+
+function isInviteReturnTo(value: string | null): boolean {
+  return value === "/join" || Boolean(value?.startsWith("/join/"));
 }

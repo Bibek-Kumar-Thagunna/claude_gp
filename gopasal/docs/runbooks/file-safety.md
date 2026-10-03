@@ -1,0 +1,9 @@
+# File safety scanner
+
+GoPasal screens accepted PDF/image uploads before object storage. The scanner is a private ClamAV `clamd` service; the API uses its streamed protocol and accepts only an explicit clean result. A detected signature returns HTTP 400 without disclosing the signature; scanner errors/timeouts return HTTP 503 and write no object. Readiness includes a scanner PING so traffic drains during an outage. A PING does not prove signature freshness, so monitor ClamAV update logs separately.
+
+For local end-to-end validation, run `docker compose --profile scan up -d clamav` from the `gopasal` directory, set `MALWARE_SCAN_PROVIDER=clamav`, `CLAMAV_HOST=127.0.0.1`, and `CLAMAV_PORT=13310` in `apps/api/.env`, then restart the API. Wait until ClamAV loads signatures before testing. This uses the same scan path as staging/production. Local/test may explicitly use `disabled`, with a boot warning; staging/production refuse it.
+
+In Kubernetes the base manifest provisions a private `clamav` service on TCP 3310, with a persistent signature volume and a network policy allowing only API pods to reach it. Never expose TCP 3310 through an ingress or a public load balancer: ClamD TCP has no authentication or encryption. Restrict the service to trusted workloads, size the node for the scanner's multi-GiB memory use, and monitor signature updates. Configure `MALWARE_SCAN_PROVIDER=clamav`, `CLAMAV_HOST=clamav`, `CLAMAV_PORT=3310`.
+
+When readiness reports `scanner: down`: check the scanner pod/container, signature-update status, memory pressure, and API-to-scanner network path. Do not set the provider to `disabled` in staging/production to restore service. Keep uploads unavailable until a clean scan can be performed. Existing private files remain accessible through their normal authorization checks; this gate applies to new uploads.

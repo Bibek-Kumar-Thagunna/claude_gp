@@ -123,6 +123,7 @@ export interface OrderFact {
   total: number;
   status: OrderStatus;
   paymentMethod: PaymentMethod;
+  refundAmount?: number;
 }
 
 /** One line of one order. `productId` is null once the product row is gone. */
@@ -165,6 +166,9 @@ function isWriteOff(status: OrderStatus): boolean {
  */
 export interface AnalyticsSummary {
   sales: number;
+  grossSales: number;
+  refunds: number;
+  netSales: number;
   ordersPlaced: number;
   ordersDelivered: number;
   ordersCancelled: number;
@@ -173,15 +177,17 @@ export interface AnalyticsSummary {
 }
 
 /** Summarising needs a status and an amount; it has no interest in the rest. */
-export type SummarisableOrder = Pick<OrderFact, 'status' | 'total'>;
+export type SummarisableOrder = Pick<OrderFact, 'status' | 'total' | 'refundAmount'>;
 
 export function summarise(orders: SummarisableOrder[]): AnalyticsSummary {
   let sales = 0;
+  let refunds = 0;
   let delivered = 0;
   let cancelled = 0;
   for (const o of orders) {
     if (isEarned(o.status)) {
       sales += o.total;
+      refunds += o.refundAmount ?? 0;
       delivered += 1;
     } else if (isWriteOff(o.status)) {
       cancelled += 1;
@@ -189,6 +195,9 @@ export function summarise(orders: SummarisableOrder[]): AnalyticsSummary {
   }
   return {
     sales,
+    grossSales: sales,
+    refunds,
+    netSales: sales - refunds,
     ordersPlaced: orders.length,
     ordersDelivered: delivered,
     ordersCancelled: cancelled,
@@ -235,6 +244,9 @@ export function summariseGroups(groups: StatusGroup[]): AnalyticsSummary {
   }
   return {
     sales,
+    grossSales: sales,
+    refunds: 0,
+    netSales: sales,
     ordersPlaced: placed,
     ordersDelivered: delivered,
     ordersCancelled: cancelled,
@@ -281,6 +293,9 @@ export interface SalesPoint {
   /** Nepal calendar date, `YYYY-MM-DD`. */
   date: string;
   sales: number;
+  gross: number;
+  refunds: number;
+  net: number;
   orders: number;
 }
 
@@ -291,16 +306,21 @@ export interface SalesPoint {
  */
 export function buildSeries(orders: OrderFact[], dayKeys: string[]): SalesPoint[] {
   const byDay = new Map<string, SalesPoint>();
-  for (const date of dayKeys) byDay.set(date, { date, sales: 0, orders: 0 });
+  for (const date of dayKeys) byDay.set(date, { date, sales: 0, gross: 0, refunds: 0, net: 0, orders: 0 });
   for (const o of orders) {
     const point = byDay.get(nepalDayKeyOf(o.placedAt));
     // An order outside the window cannot happen — the query is bounded by the same
     // instants — but if it ever did, dropping it is better than inventing a bucket.
     if (!point) continue;
     point.orders += 1;
-    if (isEarned(o.status)) point.sales += o.total;
+    if (isEarned(o.status)) {
+      point.sales += o.total;
+      point.gross += o.total;
+      point.refunds += o.refundAmount ?? 0;
+      point.net = point.gross - point.refunds;
+    }
   }
-  return dayKeys.map((date) => byDay.get(date) ?? { date, sales: 0, orders: 0 });
+  return dayKeys.map((date) => byDay.get(date) ?? { date, sales: 0, gross: 0, refunds: 0, net: 0, orders: 0 });
 }
 
 /* ------------------------------------------------------------------- Payments */

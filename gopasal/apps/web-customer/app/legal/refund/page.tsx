@@ -90,12 +90,12 @@ export default function RefundPage() {
 
       <Section id="how-to-raise" title="7. How to raise a return or refund">
         <ol>
-          <li>Open the order in the GoPasal app and message the shop, describing the issue with photos.</li>
+          <li>Open the order in GoPasal, note the order code, and contact the shop about the issue.</li>
           <li>Give the shop a reasonable opportunity to offer a replacement or refund.</li>
           <li>
             If it is not resolved, escalate to GoPasal support at{" "}
-            <a href="mailto:hello@gopasal.com">hello@gopasal.com</a> or{" "}
-            <a href="tel:+97716000000">+977 1 6000000</a> with your order number.
+            <a href="mailto:hello@gopasal.com">hello@gopasal.com</a> or open a ticket in the{" "}
+            <a href="/support">Help &amp; Support centre</a> with your order number.
           </li>
         </ol>
       </Section>
@@ -111,8 +111,8 @@ export default function RefundPage() {
       <Section id="contact" title="9. Contact us">
         <p>
           Need help with a return or refund? Email{" "}
-          <a href="mailto:hello@gopasal.com">hello@gopasal.com</a> or call{" "}
-          <a href="tel:+97716000000">+977 1 6000000</a>. See also our{" "}
+          <a href="mailto:hello@gopasal.com">hello@gopasal.com</a> or use the{" "}
+          <a href="/support">Help &amp; Support centre</a>. See also our{" "}
           <a href="/legal/delivery">Delivery Policy</a> and <a href="/support">Help &amp; Support</a>.
         </p>
       </Section>

@@ -79,15 +79,48 @@ export class ApplicationFieldsDto {
   @MaxLength(300)
   fullAddress?: string;
 
+  /*
+    Where the shop is, taken by the applicant's own phone.
+
+    These columns existed on `ShopApplication` from the start and no applicant
+    route wrote them, so an application arrived without a pin and the approved
+    shop stayed invisible behind `VERIFIED_LOCATION` until somebody ran the
+    separate capture flow. That is backwards on a phone: the applicant is
+    standing in the shop, holding a GPS, at the one moment they are most
+    motivated to get it right.
+
+    The bounds are `SubmitCapturedLocationDto`'s, deliberately and to the metre
+    — a coordinate accepted here and a coordinate accepted there describe the
+    same shop and must mean the same thing. `accuracyM` is required alongside
+    the pair rather than optional: a coordinate whose accuracy nobody recorded
+    cannot be reviewed, and a reviewer who cannot tell ±5 m from ±5 km is being
+    asked to approve a guess.
+
+    `locationCaptureMethod` is deliberately NOT here. It is the server's word
+    for how a coordinate was obtained, and a client that could set it could
+    claim a verification it never performed.
+  */
+  @ApiPropertyOptional({ example: 27.7172, description: "The shop's latitude, from the phone" })
   @IsOptional()
   @Type(() => Number)
+  @IsNumber()
   @IsLatitude()
   lat?: number;
 
+  @ApiPropertyOptional({ example: 85.324 })
   @IsOptional()
   @Type(() => Number)
+  @IsNumber()
   @IsLongitude()
   lng?: number;
+
+  @ApiPropertyOptional({ description: 'Horizontal accuracy in metres, as the phone reported it', minimum: 1, maximum: 100 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  @Max(100)
+  locationAccuracyM?: number;
 
   @ApiPropertyOptional({ description: 'How far the shop delivers, in km', minimum: 0.5, maximum: 20 })
   @IsOptional()
@@ -125,7 +158,7 @@ export class ApplicationFieldsDto {
   @MaxLength(40)
   citizenshipNo?: string;
 
-  // ── business registration (optional by design) ──
+  // ── legal business identity (required at submission) ──
   @IsOptional()
   @IsString()
   @MaxLength(40)

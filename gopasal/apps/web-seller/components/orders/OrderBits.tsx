@@ -34,6 +34,8 @@ const DELIVERY_TONES: Record<DeliveryStatusWire, Tone> = {
   EN_ROUTE: "crimson",
   DELIVERED: "green",
   FAILED: "red",
+  RETURNING_TO_SHOP: "marigold",
+  RETURNED_TO_SHOP: "blue",
 };
 
 /** The delivery leg's own state, which runs in parallel with the order's. */

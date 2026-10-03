@@ -26,8 +26,6 @@ export const EDITABLE_FIELDS = [
   "contactEmail",
   "area",
   "fullAddress",
-  "lat",
-  "lng",
   "deliveryRadiusKm",
   "hours",
   "soloMode",
@@ -59,6 +57,7 @@ export const FIELD_LABELS: Record<string, string> = {
   fullAddress: "Full address",
   lat: "Map location",
   lng: "Map location",
+  location: "Verified shop location",
   deliveryRadiusKm: "Delivery coverage",
   hours: "Opening hours",
   soloMode: "Solo mode",
@@ -92,7 +91,7 @@ export const FIELD_GROUPS: { section: string; fields: EditableField[] }[] = [
   },
   {
     section: "Contact & location",
-    fields: ["contactPhone", "contactEmail", "area", "fullAddress", "lat", "deliveryRadiusKm"],
+    fields: ["contactPhone", "contactEmail", "area", "fullAddress", "deliveryRadiusKm"],
   },
   {
     section: "Owner & registration",
@@ -115,9 +114,10 @@ export const FIELD_GROUPS: { section: string; fields: EditableField[] }[] = [
 const DOCUMENT_LABELS: Record<DocumentKind, string> = {
   CITIZENSHIP_FRONT: "Citizenship — front",
   CITIZENSHIP_BACK: "Citizenship — back",
-  PAN_CERTIFICATE: "PAN certificate",
+  PAN_CERTIFICATE: "Business PAN certificate",
   VAT_CERTIFICATE: "VAT certificate",
-  BUSINESS_LICENCE: "Business registration",
+  BUSINESS_LICENCE: "Business registration certificate",
+  REGULATORY_LICENCE: "Sector regulator licence",
   SHOP_PHOTO: "Photo of the shop",
   OWNER_PHOTO: "Photo of the owner",
   BANK_PROOF: "Bank account proof",
@@ -144,9 +144,22 @@ export function documentLabelOf(kind: string): string {
  * the conditional bank proof; the server's `missingDocuments` is still the answer
  * that decides whether approval is allowed.
  */
-export function requiredDocumentKinds(payoutMethod: PayoutMethod | null): DocumentKind[] {
-  const base: DocumentKind[] = ["CITIZENSHIP_FRONT", "CITIZENSHIP_BACK", "SHOP_PHOTO"];
-  return payoutMethod === "BANK" ? [...base, "BANK_PROOF"] : base;
+export function requiredDocumentKinds(
+  payoutMethod: PayoutMethod | null,
+  vatNo?: string | null,
+  categorySlug?: string | null,
+): DocumentKind[] {
+  const required: DocumentKind[] = [
+    "CITIZENSHIP_FRONT",
+    "CITIZENSHIP_BACK",
+    "BUSINESS_LICENCE",
+    "PAN_CERTIFICATE",
+    "SHOP_PHOTO",
+  ];
+  if (vatNo?.trim()) required.push("VAT_CERTIFICATE");
+  if (categorySlug === "pharmacy") required.push("REGULATORY_LICENCE");
+  if (payoutMethod === "BANK") required.push("BANK_PROOF");
+  return required;
 }
 
 const PAYOUT_LABELS: Record<PayoutMethod, string> = {

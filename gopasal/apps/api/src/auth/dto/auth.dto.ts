@@ -11,7 +11,7 @@ export class RequestOtpDto {
 
   @ApiPropertyOptional({ example: 'login', default: 'login' })
   @IsOptional()
-  @IsString()
+  @IsIn(['login'])
   purpose?: string;
 }
 
@@ -28,7 +28,7 @@ export class VerifyOtpDto {
 
   @ApiPropertyOptional({ default: 'login' })
   @IsOptional()
-  @IsString()
+  @IsIn(['login'])
   purpose?: string;
 
   // `IsIn` takes a `readonly any[]`, so the `as const` tuple goes in as-is —
@@ -40,13 +40,15 @@ export class VerifyOtpDto {
 }
 
 export class RefreshDto {
-  @ApiProperty()
+  @ApiPropertyOptional({ description: 'Native refresh token; web clients use the HttpOnly cookie' })
+  @IsOptional()
   @IsString()
-  refreshToken!: string;
+  refreshToken?: string;
 }
 
 export class LogoutDto {
-  @ApiProperty()
+  @ApiPropertyOptional({ description: 'Native refresh token; web clients use the HttpOnly cookie' })
+  @IsOptional()
   @IsString()
-  refreshToken!: string;
+  refreshToken?: string;
 }

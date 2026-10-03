@@ -35,6 +35,15 @@ export default function TermsPage() {
         </p>
       </Section>
 
+      <Section id="map-services" title="Third-party map services">
+        <p>
+          The optional Google address finder is subject to the{" "}
+          <a href="https://cloud.google.com/maps-platform/terms" target="_blank" rel="noreferrer">Google Maps Platform Terms of Service</a>.
+          Map searches and routes are aids to choosing a delivery point, not a guarantee that a
+          rider can reach a particular gate. Please confirm your pin and written instructions.
+        </p>
+      </Section>
+
       <Section id="definitions" title="2. Definitions">
         <ul>
           <li>
@@ -231,8 +240,8 @@ export default function TermsPage() {
       <Section id="contact" title="16. Contact us">
         <p>
           Questions about these Terms? Reach us at{" "}
-          <a href="mailto:hello@gopasal.com">hello@gopasal.com</a> or{" "}
-          <a href="tel:+97716000000">+977 1 6000000</a>. GoPasal is operated by Velayon Dynamics Pvt.
+          <a href="mailto:hello@gopasal.com">hello@gopasal.com</a> or open a ticket in the{" "}
+          <a href="/support">Help &amp; Support centre</a>. GoPasal is operated by Velayon Dynamics Pvt.
           Ltd., Kathmandu, Nepal.
         </p>
       </Section>

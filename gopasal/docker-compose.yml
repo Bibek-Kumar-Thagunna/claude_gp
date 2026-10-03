@@ -27,13 +27,14 @@
 #
 #   docker compose up -d                    # postgres + redis (STORAGE_PROVIDER=local)
 #   docker compose --profile s3 up -d       # …plus MinIO (STORAGE_PROVIDER=s3)
+#   docker compose --profile scan up -d     # …plus ClamAV (MALWARE_SCAN_PROVIDER=clamav)
 #
 # What is NOT here, and why: SMS, maps, payments and push are not emulated. Each
 # one has a real, honest local implementation selected by a *_PROVIDER variable —
 # SMS_PROVIDER=log prints the one-time code to the API log, MAP_PROVIDER=osm
-# computes distances locally, PUSH_PROVIDER=log, and payments use Cash on Delivery
-# (eSewa/Khalti point at the vendors' own published sandboxes, not at a local
-# imitation of a gateway). Nothing "runs in mock mode" pretending to succeed:
+# computes distances locally, PUSH_PROVIDER=log, and payment gateways remain
+# absent until their real credentials are configured (COD remains available).
+# Nothing in the browser pretends to succeed locally:
 # see apps/api/.env.example, which documents the development and the production
 # setting for every one of them.
 
@@ -86,13 +87,26 @@ services:
       timeout: 3s
       retries: 10
 
+  # Optional free file-safety service. ClamD's TCP protocol has no built-in
+  # authentication or encryption, so the development port is loopback-only.
+  # Budget several GiB of RAM while signatures are loaded.
+  clamav:
+    image: clamav/clamav:1.4.6
+    container_name: gopasal-clamav
+    profiles: ["scan"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${CLAMAV_HOST_PORT:-13310}:3310"
+    volumes:
+      - gopasal_clamavdata:/var/lib/clamav
+
   # ── optional: local S3 ────────────────────────────────────────────────────────
   # Only starts with `--profile s3`, because the default STORAGE_PROVIDER=local
   # writes to ./apps/api/uploads and needs nothing running. Switch to MinIO when
   # you want the *production* code path — signed SigV4 PUT/DELETE against a real
   # S3 API — under test locally. Same code, different endpoint.
   minio:
-    image: minio/minio:RELEASE.2024-09-13T20-26-02Z
+    image: quay.io/minio/minio:RELEASE.2024-09-13T20-26-02Z
     container_name: gopasal-minio
     profiles: ["s3"]
     restart: unless-stopped
@@ -120,11 +134,12 @@ services:
       timeout: 5s
       retries: 20
 
-  # One-shot: create the bucket and allow anonymous GET on it, so the URLs the API
-  # hands to browsers work without pre-signing — which is what a public product
-  # image bucket looks like in production too. Exits 0 and stays exited.
+  # One-shot: create the bucket, REMOVE any old bucket-wide public policy, then
+  # allow anonymous GET only under public/. Private KYC/support/delivery evidence
+  # shares this bucket and must never inherit a root download policy. Re-running
+  # this job also repairs an older local MinIO volume with the unsafe policy.
   minio-init:
-    image: minio/mc:RELEASE.2024-09-16T17-43-14Z
+    image: quay.io/minio/mc:RELEASE.2024-09-16T17-43-14Z
     container_name: gopasal-minio-init
     profiles: ["s3"]
     depends_on:
@@ -134,8 +149,9 @@ services:
       /bin/sh -c "
       mc alias set gp http://minio:9000 gopasal_dev gopasal_dev_secret &&
       mc mb --ignore-existing gp/${S3_BUCKET:-gopasal-dev} &&
-      mc anonymous set download gp/${S3_BUCKET:-gopasal-dev} &&
-      echo 'bucket ${S3_BUCKET:-gopasal-dev} ready'
+      mc anonymous set private gp/${S3_BUCKET:-gopasal-dev} &&
+      mc anonymous set download gp/${S3_BUCKET:-gopasal-dev}/public &&
+      echo 'bucket ${S3_BUCKET:-gopasal-dev} ready: only public/ is anonymously downloadable'
       "
     restart: "no"
 
@@ -143,3 +159,4 @@ volumes:
   gopasal_pgdata:
   gopasal_redisdata:
   gopasal_miniodata:
+  gopasal_clamavdata:

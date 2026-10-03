@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gopasal-config
+data:
+  NODE_ENV: production
+  APP_ENV: production
+  PORT: "4000"
+  API_PREFIX: api
+  API_DOCS_ENABLED: "false"
+  METRICS_ENABLED: "true"
+  METRICS_HOST: 0.0.0.0
+  METRICS_PORT: "9464"
+  PUBLIC_URL: https://api.example.invalid
+  CUSTOMER_WEB_URL: https://app.example.invalid
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  STORAGE_PROVIDER: s3
+  MALWARE_SCAN_PROVIDER: clamav
+  CLAMAV_HOST: clamav
+  CLAMAV_PORT: "3310"
+  SMS_PROVIDER: sparrow
+  MAP_PROVIDER: baato
+  MAP_PIN_PROVIDER: google
+  BAATO_MAP_STYLE: breeze
+  BAATO_SERVER_MONTHLY_LIMIT: "1200"
+  PUSH_PROVIDER: expo
+  SUPPORT_ASSISTANT_PROVIDER: knowledge
+  TRUST_PROXY: "1"
+  CORS_ORIGINS: https://app.example.invalid,https://seller.example.invalid,https://admin.example.invalid,https://rider.example.invalid

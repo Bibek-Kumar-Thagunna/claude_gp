@@ -8,7 +8,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { AllExceptionsFilter } from './all-exceptions.filter';
+import { AllExceptionsFilter, redactRequestUrl } from './all-exceptions.filter';
 
 /**
  * This filter is the last thing every failed request passes through, which makes
@@ -106,6 +106,39 @@ describe('AllExceptionsFilter · the envelope', () => {
     const gone = through(absent);
     assert.equal(gone.status, 404);
     assert.equal(gone.body.message, 'Record not found.');
+  });
+});
+
+describe('AllExceptionsFilter · bearer credentials in request paths', () => {
+  it('redacts invitation, location-capture and push-device tokens', () => {
+    assert.equal(
+      redactRequestUrl('/api/v1/invites/very-secret-link-token?from=sms'),
+      '/api/v1/invites/[REDACTED]?from=sms',
+    );
+    assert.equal(
+      redactRequestUrl('/api/v1/public/location-captures/phone-bearer-token'),
+      '/api/v1/public/location-captures/[REDACTED]',
+    );
+    assert.equal(
+      redactRequestUrl('/api/v1/notifications/devices/ExponentPushToken%5Bsecret%5D'),
+      '/api/v1/notifications/devices/[REDACTED]',
+    );
+  });
+
+  it('does not redact ordinary invite routes or unrelated identifiers', () => {
+    assert.equal(redactRequestUrl('/api/v1/invites/mine/pending'), '/api/v1/invites/mine/pending');
+    assert.equal(redactRequestUrl('/api/v1/invites/accept'), '/api/v1/invites/accept');
+    assert.equal(redactRequestUrl('/api/v1/orders/order_1'), '/api/v1/orders/order_1');
+  });
+
+  it('never echoes a bearer token in an error response', () => {
+    const { body } = through(
+      new NotFoundException('This invitation link is not valid.'),
+      'GET',
+      '/api/v1/invites/secret-token-value',
+    );
+    assert.equal(body.path, '/api/v1/invites/[REDACTED]');
+    assert.ok(!JSON.stringify(body).includes('secret-token-value'));
   });
 });
 

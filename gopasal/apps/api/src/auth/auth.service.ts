@@ -32,6 +32,20 @@ export function maskPhone(phone: string): string {
   return phone.length < 6 ? '**********' : `${phone.slice(0, 3)}xxxxx${phone.slice(-2)}`;
 }
 
+/**
+ * Keep the local OTP helper behind one auditable, testable condition. Checking
+ * both values matters: a staging process must not expose codes merely because a
+ * non-delivering provider was selected, and a real gateway in development must
+ * exercise actual delivery.
+ */
+export function developmentOtpForResponse(
+  env: string,
+  provider: string,
+  code: string,
+): string | undefined {
+  return (env === 'local' || env === 'test') && provider === 'log' ? code : undefined;
+}
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
@@ -50,9 +64,12 @@ export class AuthService {
    * expires, supersedes its predecessor and is rate-limited two ways (a
    * per-phone cooldown and an hourly ceiling). None of that changes with the
    * transport: in development the configured provider prints the message to this
-   * log, and the code still has to be typed back into `verifyOtp`. The code is
-   * never returned in the HTTP response — that would make every phone number
-   * signable-in by anyone who can call the endpoint.
+   * log, and the code still has to be typed back into `verifyOtp`.
+   *
+   * The one exception is an explicit `development + log provider` process. Its
+   * response includes a clearly-labelled helper value because there is no SMS
+   * gateway on a local machine. Production configuration refuses the log provider
+   * at boot, and every other environment/provider combination omits the value.
    */
   async requestOtp(input: { phone: string; purpose?: string }): Promise<{
     sent: true;
@@ -60,6 +77,12 @@ export class AuthService {
     expiresInSeconds: number;
     /** False when the configured provider is the development one (see the API log). */
     delivered: boolean;
+    /**
+     * Local-development convenience only. This is still the real, expiring OTP
+     * and must be verified normally; it is never present outside the explicit
+     * development + log-provider combination.
+     */
+    developmentCode?: string;
   }> {
     const phone = normalizeNepalPhone(input.phone);
     const purpose = input.purpose ?? 'login';
@@ -117,11 +140,18 @@ export class AuthService {
       );
     }
 
+    const developmentCode = developmentOtpForResponse(
+      this.config.get('env', { infer: true }),
+      this.sms.name,
+      code,
+    );
+
     return {
       sent: true,
       cooldownSeconds: otp.resendCooldown,
       expiresInSeconds: otp.ttl,
       delivered: this.sms.delivers,
+      ...(developmentCode ? { developmentCode } : {}),
     };
   }
 
@@ -150,8 +180,42 @@ export class AuthService {
     userAgent?: string;
     ip?: string;
   }): Promise<{ user: SafeUser; tokens: TokenPair; isNewUser: boolean }> {
+    const phone = await this.verifyOtpChallenge({
+      phone: input.phone,
+      code: input.code,
+      purpose: input.purpose ?? 'login',
+    });
+
+    const existing = await this.prisma.user.findUnique({ where: { phone } });
+    const user =
+      existing ??
+      (await this.prisma.user.create({ data: { phone, locale: 'en', status: 'ACTIVE' } }));
+    if (user.status !== 'ACTIVE') {
+      throw new BadRequestException('This account is not active. Contact support.');
+    }
+
+    const tokens = await this.tokens.issueForUser(user, {
+      surface: input.surface ?? 'customer',
+      userAgent: input.userAgent,
+      ip: input.ip,
+    });
+
+    return { user: toSafeUser(user), tokens, isNewUser: !existing };
+  }
+
+  /**
+   * Verify and consume one purpose-bound challenge without creating a session.
+   * Sensitive authenticated workflows (such as account deletion) use this
+   * rather than the public login exchange, so a code issued for one purpose
+   * cannot be replayed as another.
+   */
+  async verifyOtpChallenge(input: {
+    phone: string;
+    code: string;
+    purpose: string;
+  }): Promise<string> {
     const phone = normalizeNepalPhone(input.phone);
-    const purpose = input.purpose ?? 'login';
+    const purpose = input.purpose;
     const otp = this.config.get('otp', { infer: true });
 
     const challenge = await this.prisma.otpChallenge.findFirst({
@@ -171,33 +235,39 @@ export class AuthService {
 
     const ok = await argon2.verify(challenge.codeHash, input.code).catch(() => false);
     if (!ok) {
-      await this.prisma.otpChallenge.update({
-        where: { id: challenge.id },
+      // Keep the attempt counter tied to an unconsumed challenge. A correct
+      // request racing this failure may already have consumed it, in which case
+      // this request must not mutate the historical record afterwards.
+      await this.prisma.otpChallenge.updateMany({
+        where: {
+          id: challenge.id,
+          consumedAt: null,
+          expiresAt: { gt: new Date() },
+          attempts: { lt: otp.maxAttempts },
+        },
         data: { attempts: { increment: 1 } },
       });
       throw new BadRequestException('Incorrect code. Please try again.');
     }
 
-    await this.prisma.otpChallenge.update({
-      where: { id: challenge.id },
+    // Verification is deliberately slow, so two requests can both finish
+    // argon2.verify before either reaches the write below. Claim the challenge
+    // with a compare-and-set instead of an unconditional update: exactly one
+    // request may turn an unconsumed code into a consumed one. This preserves
+    // the security meaning of "one-time" under retries and hostile concurrency.
+    const claimed = await this.prisma.otpChallenge.updateMany({
+      where: {
+        id: challenge.id,
+        consumedAt: null,
+        expiresAt: { gt: new Date() },
+        attempts: { lt: otp.maxAttempts },
+      },
       data: { consumedAt: new Date() },
     });
-
-    const existing = await this.prisma.user.findUnique({ where: { phone } });
-    const user =
-      existing ??
-      (await this.prisma.user.create({ data: { phone, locale: 'en', status: 'ACTIVE' } }));
-    if (user.status !== 'ACTIVE') {
-      throw new BadRequestException('This account is not active. Contact support.');
+    if (claimed.count !== 1) {
+      throw new BadRequestException('Code expired or already used. Request a new one.');
     }
-
-    const tokens = await this.tokens.issueForUser(user, {
-      surface: input.surface ?? 'customer',
-      userAgent: input.userAgent,
-      ip: input.ip,
-    });
-
-    return { user: toSafeUser(user), tokens, isNewUser: !existing };
+    return phone;
   }
 
   async refresh(refreshToken: string, ctx: { userAgent?: string; ip?: string }): Promise<TokenPair> {

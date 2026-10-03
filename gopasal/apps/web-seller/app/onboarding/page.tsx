@@ -161,8 +161,8 @@ export default function OnboardingPage() {
                     {app.shop?.name ?? "Your shop"} is on GoPasal
                   </h2>
                   <p className="mt-1 text-sm text-ink-500">
-                    Your dashboard is open. Add a few products and set your opening hours, and you are
-                    ready to take orders.
+                    Your dashboard is open. Before customers can discover the shop, add a verified
+                    shop pin and publish at least one product that can be ordered.
                   </p>
                 </div>
               </div>
@@ -207,6 +207,7 @@ export default function OnboardingPage() {
                 problemFor={problemFor}
                 onSave={save}
                 onDirtyChange={setUnsaved}
+                onLocationCaptured={refresh}
               />
               <DocumentsPanel app={app} onChanged={refresh} />
               <SubmitPanel app={app} unsavedChanges={unsaved} onUpdated={setApp} />
@@ -268,6 +269,9 @@ function StartCard({
         </p>
         <ul className="mt-2 space-y-1.5 text-sm text-ink-600">
           <li>Your citizenship certificate — a photo of the front and the back</li>
+          <li>Your current business registration certificate and registration number</li>
+          <li>Your business PAN certificate and PAN number</li>
+          <li>A regulator licence if you run a regulated shop, such as a pharmacy</li>
           <li>A photo of your shopfront</li>
           <li>Your bank account details, or your eSewa or Khalti number</li>
         </ul>

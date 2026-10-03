@@ -180,7 +180,7 @@ function harness(
   } as unknown as PrismaService;
 
   const storage = recordingStorage(storageLog);
-  const uploads = new UploadsService(storage, config());
+  const uploads = new UploadsService(storage, config(), { name: 'disabled', scan: () => Promise.resolve(), ready: () => Promise.resolve(true) });
   return { products: new ProductsService(prisma, uploads, storage), storage: storageLog, db };
 }
 
@@ -374,7 +374,7 @@ describe('product photos · a mutation may only name a key this product holds', 
       remove: () => Promise.reject(new Error('down')),
       publicUrl: (key: string) => `https://cdn.test/${key}`,
     };
-    const products = new ProductsService(prisma, new UploadsService(storage, config()), storage);
+    const products = new ProductsService(prisma, new UploadsService(storage, config(), { name: 'disabled', scan: () => Promise.resolve(), ready: () => Promise.resolve(true) }), storage);
 
     const result = await products.removeImage('shop_a', 'prod_1', OWN_KEYS[0]);
     assert.deepEqual(result.images, []);

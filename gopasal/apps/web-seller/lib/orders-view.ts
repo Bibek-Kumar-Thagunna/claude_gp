@@ -51,6 +51,8 @@ const DELIVERY_STATUS_LABELS: Record<DeliveryStatusWire, string> = {
   EN_ROUTE: "On the way",
   DELIVERED: "Handed over",
   FAILED: "Delivery failed",
+  RETURNING_TO_SHOP: "Returning to shop",
+  RETURNED_TO_SHOP: "Returned to shop",
 };
 
 export function deliveryStatusLabel(status: DeliveryStatusWire): string {
@@ -153,6 +155,12 @@ export type SellerOrder = {
   /** Only when the API computed it at checkout. `null` means unknown, not zero. */
   distanceMeters: number | null;
   codCollected: boolean;
+  hasProofPhoto: boolean;
+  failReason: string | null;
+  pickedUpAt: string | null;
+  returnStartedAt: string | null;
+  returnedAt: string | null;
+  returnNote: string | null;
 
   actions: OrderActions;
 };
@@ -218,6 +226,10 @@ function nextDeliveryStatus(
       return orderStatus === "OUT_FOR_DELIVERY" ? "EN_ROUTE" : null;
     case "EN_ROUTE":
       return "DELIVERED";
+    case "FAILED":
+      return delivery.pickedUpAt ? "RETURNING_TO_SHOP" : null;
+    case "RETURNING_TO_SHOP":
+      return "RETURNED_TO_SHOP";
     default:
       return null;
   }
@@ -225,19 +237,23 @@ function nextDeliveryStatus(
 
 function actionsFor(status: OrderStatusWire, delivery: DeliveryWire | null): OrderActions {
   const hasRider = Boolean(delivery?.riderId);
-  const legInProgress =
-    delivery?.status === "PICKED_UP" || delivery?.status === "EN_ROUTE";
+  const legInProgress = delivery?.status === "PICKED_UP" || delivery?.status === "EN_ROUTE";
   return {
     accept: status === "PLACED",
     reject: status === "PLACED",
     pack: status === "ACCEPTED",
     dispatch: status === "PACKED" && hasRider,
-    // The API allows cancel from PLACED, ACCEPTED and PACKED only — never once
-    // the order is out with a rider.
-    cancel: status === "PLACED" || status === "ACCEPTED" || status === "PACKED",
+    cancel:
+      status === "PLACED" ||
+      status === "ACCEPTED" ||
+      status === "PACKED" ||
+      (status === "OUT_FOR_DELIVERY" && delivery?.status === "RETURNED_TO_SHOP"),
     assignRider:
       !isTerminalOrderStatus(status) &&
-      (delivery?.status === "UNASSIGNED" || delivery?.status === "ASSIGNED"),
+      (delivery?.status === "UNASSIGNED" ||
+        delivery?.status === "ASSIGNED" ||
+        (delivery?.status === "FAILED" && !delivery.pickedUpAt) ||
+        delivery?.status === "RETURNED_TO_SHOP"),
     unassignRider: delivery?.status === "ASSIGNED",
     nextDeliveryStatus: nextDeliveryStatus(status, delivery),
     markFailed: legInProgress || delivery?.status === "ASSIGNED",
@@ -287,6 +303,12 @@ function base(wire: SellerOrderListItemWire | SellerOrderDetailWire): SellerOrde
     rider: riderFrom(delivery),
     distanceMeters: delivery?.distanceMeters ?? null,
     codCollected: delivery?.codCollected ?? false,
+    hasProofPhoto: delivery?.hasProofPhoto ?? false,
+    failReason: delivery?.failReason ?? null,
+    pickedUpAt: delivery?.pickedUpAt ?? null,
+    returnStartedAt: delivery?.returnStartedAt ?? null,
+    returnedAt: delivery?.returnedAt ?? null,
+    returnNote: delivery?.returnNote ?? null,
 
     actions: actionsFor(wire.status, delivery),
   };
@@ -463,9 +485,4 @@ export function queueTabCount(id: QueueTabId, summary: OrderQueueSummaryWire): n
  * `DELIVERED` is *not* in here: it grows without bound and would crowd out live work
  * in a bounded read. The board asks for it separately, as a short newest-first page.
  */
-export const BOARD_OPEN_STATUSES: OrderStatusWire[] = [
-  "ACCEPTED",
-  "PACKED",
-  "OUT_FOR_DELIVERY",
-];
-
+export const BOARD_OPEN_STATUSES: OrderStatusWire[] = ["ACCEPTED", "PACKED", "OUT_FOR_DELIVERY"];

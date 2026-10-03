@@ -20,7 +20,7 @@ const STEPS = [
   {
     icon: Search,
     title: "Find a shop near you",
-    body: "Set your location and browse verified neighbourhood shops that serve your area — kirana, pharmacy, vegetables, bakery and more. Each shop shows its hours, ratings and delivery area.",
+    body: "Browse active neighbourhood shops — kirana, pharmacy, vegetables, bakery and more — then check each shop's hours and delivery area.",
   },
   {
     icon: ShoppingCart,
@@ -29,8 +29,8 @@ const STEPS = [
   },
   {
     icon: MessageCircle,
-    title: "Talk to the shopkeeper",
-    body: "Message or call the shop owner or their staff directly to share directions, add a landmark, or agree a convenient time. Your phone number stays protected — contact is routed through GoPasal.",
+    title: "Contact the shopkeeper",
+    body: "Use the shop's published phone number to ask about stock, delivery coverage, directions or timing.",
   },
   {
     icon: PackageCheck,
@@ -42,7 +42,7 @@ const STEPS = [
 const FAQ = [
   {
     q: "How fast will my order arrive?",
-    a: "Delivery is done by each shop, within its own area and on its own schedule — so timing is set by the shop, not by GoPasal. We don't promise a fixed delivery time. If timing matters, message the shop to agree a convenient window before or after ordering.",
+    a: "Delivery is done by each shop, within its own area and on its own schedule — so timing is set by the shop, not by GoPasal. We don't promise a fixed delivery time. If timing matters, call the shop using its published contact number.",
   },
   {
     q: "Who actually delivers my order?",
@@ -62,7 +62,7 @@ const FAQ = [
   },
   {
     q: "Which areas does GoPasal serve?",
-    a: "Each shop sets the area it can serve, and coverage grows as more shops join across the Kathmandu valley and beyond. Set your location to see the shops that deliver to your neighbourhood.",
+    a: "Each shop sets the area it can serve, and coverage grows as more shops join across the Kathmandu valley and beyond. Check the delivery area shown for a shop before ordering.",
   },
 ];
 

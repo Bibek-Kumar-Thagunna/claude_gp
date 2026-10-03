@@ -1,5 +1,6 @@
-import { ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  Equals,
   IsBoolean,
   IsEmail,
   IsIn,
@@ -10,6 +11,7 @@ import {
   IsString,
   Matches,
   MaxLength,
+  Length,
 } from 'class-validator';
 import { OptionalField } from '../../../common/dto/optional-field.decorator';
 
@@ -186,4 +188,31 @@ export class UpdateAddressDto extends AddressDto {
   @OptionalField() declare phone: string;
   @OptionalField() declare area: string;
   @OptionalField() declare fullAddress: string;
+}
+
+/** Second-factor and explicit acknowledgement for the irreversible privacy action. */
+export class DeleteAccountDto {
+  @ApiProperty({ example: '123456', description: 'Purpose-bound code sent to the login phone' })
+  @IsString()
+  @Length(4, 8)
+  code!: string;
+
+  @ApiProperty({ example: 'DELETE MY ACCOUNT' })
+  @IsString()
+  @Equals('DELETE MY ACCOUNT')
+  confirmation!: string;
+
+  @ApiProperty({
+    example: true,
+    description: 'Acknowledges that legal, accounting and fraud records are retained temporarily',
+  })
+  @IsBoolean()
+  @Equals(true)
+  acknowledgeRetention!: boolean;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  reason?: string;
 }

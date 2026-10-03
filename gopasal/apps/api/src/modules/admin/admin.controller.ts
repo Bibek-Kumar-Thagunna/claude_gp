@@ -6,7 +6,7 @@ import { Audit } from '../audit/audit.decorator';
 import { AuditInterceptor } from '../audit/audit.interceptor';
 import { AuditService } from '../audit/audit.service';
 import { AdminService } from './admin.service';
-import { ModerateProductDto } from './dto/admin.dto';
+import { ModerateProductDto, ShopLifecycleReasonDto } from './dto/admin.dto';
 
 /**
  * Core platform admin surface (admin.gopasal.com): shop approvals, user
@@ -61,15 +61,15 @@ export class AdminController {
   @Post('shops/:shopId/reject')
   @RequirePermissions('shops.reject')
   @Audit('shop.reject', 'Shop', 'shopId')
-  rejectShop(@Param('shopId') shopId: string) {
-    return this.admin.rejectShop(shopId);
+  rejectShop(@Param('shopId') shopId: string, @Body() dto: ShopLifecycleReasonDto) {
+    return this.admin.rejectShop(shopId, dto.reason);
   }
 
   @Post('shops/:shopId/suspend')
   @RequirePermissions('shops.suspend')
   @Audit('shop.suspend', 'Shop', 'shopId')
-  suspendShop(@Param('shopId') shopId: string) {
-    return this.admin.suspendShop(shopId);
+  suspendShop(@Param('shopId') shopId: string, @Body() dto: ShopLifecycleReasonDto) {
+    return this.admin.suspendShop(shopId, dto.reason);
   }
 
   @Post('shops/:shopId/reactivate')
@@ -101,6 +101,13 @@ export class AdminController {
   }
 
   // ── Catalog moderation ───────────────────────────────────────────────────
+  @Get('products')
+  @RequirePermissions('catalog.moderate')
+  @ApiOperation({ summary: 'Platform-wide product moderation queue' })
+  listProducts(@Query('q') q?: string, @Query('active') active?: string) {
+    return this.admin.listProducts(q, active === undefined ? undefined : active === 'true');
+  }
+
   @Patch('products/:productId/moderate')
   @RequirePermissions('catalog.moderate')
   @Audit('catalog.moderate', 'Product', 'productId')

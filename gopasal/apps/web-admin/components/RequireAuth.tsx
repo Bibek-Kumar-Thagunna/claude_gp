@@ -1,9 +1,9 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Button } from "@/components/primitives";
-import { ErrorPanel, LoadingPanel } from "@/components/states";
+import { ConsoleBoot, ErrorPanel } from "@/components/states";
 import { useAuth } from "@/components/auth-provider";
 import { apiConfigured, NO_API_MESSAGE } from "@gopasal/api-client";
 
@@ -33,13 +33,14 @@ export function RequireAuth({
   permission?: string;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
   const { status, me, error, isStaff, hasPermission, signOut, reload } = useAuth();
   const configured = apiConfigured();
 
   React.useEffect(() => {
     if (!configured) return;
-    if (status === "anonymous") router.replace("/login");
-  }, [configured, status, router]);
+    if (status === "anonymous") router.replace(`/login?returnTo=${encodeURIComponent(pathname)}`);
+  }, [configured, status, router, pathname]);
 
   if (!configured) {
     return (
@@ -50,19 +51,11 @@ export function RequireAuth({
   }
 
   if (status === "loading") {
-    return (
-      <div className="mx-auto max-w-xl py-16">
-        <LoadingPanel label="Checking your session…" />
-      </div>
-    );
+    return <ConsoleBoot label="Restoring your secure session…" />;
   }
 
   if (status === "anonymous") {
-    return (
-      <div className="mx-auto max-w-xl py-16">
-        <LoadingPanel label="Taking you to sign in…" />
-      </div>
-    );
+    return <ConsoleBoot label="Taking you to sign in…" />;
   }
 
   // Signed in, but `/auth/me` did not come back. Without it there is no way to

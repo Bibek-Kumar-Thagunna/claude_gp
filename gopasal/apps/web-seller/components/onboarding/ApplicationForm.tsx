@@ -15,6 +15,7 @@ import {
 import type { ApiError } from "@gopasal/api-client";
 import type { Application, ApplicationFields, Category } from "@/lib/api/types";
 import { fieldLabel } from "@/lib/onboarding-view";
+import { ShopLocationCapture } from "@/components/location/ShopLocationCapture";
 
 /**
  * The application form.
@@ -23,8 +24,8 @@ import { fieldLabel } from "@/lib/onboarding-view";
  * because anything else would be rejected by the whole request. The starred
  * fields are `REQUIRED_AT_SUBMIT` on the server, including the conditional payout
  * details: a bank payout needs an account, a wallet payout needs a number, and
- * the form asks for exactly one of them. Business registration, PAN and VAT are
- * unstarred on purpose — most neighbourhood shops in Nepal have none.
+ * the form asks for exactly one of them. Legal business registration and PAN
+ * are required for every marketplace seller; VAT stays conditional.
  *
  * Saving is explicit. An autosaving wizard would either PATCH on every keystroke
  * or quietly lose the last thing typed, and the server's answer to a save (a
@@ -37,6 +38,7 @@ export function ApplicationForm({
   problemFor,
   onSave,
   onDirtyChange,
+  onLocationCaptured,
 }: {
   app: Application;
   categories: Category[];
@@ -45,6 +47,7 @@ export function ApplicationForm({
   onSave: (fields: ApplicationFields) => Promise<void>;
   /** Lets the submit panel refuse to send while something is unsaved. */
   onDirtyChange?: (dirty: boolean) => void;
+  onLocationCaptured: () => Promise<void>;
 }) {
   const [initial, setInitial] = React.useState<FormValues>(() => fromApplication(app));
   const [values, setValues] = React.useState<FormValues>(initial);
@@ -79,8 +82,6 @@ export function ApplicationForm({
   const fields = React.useMemo(() => diffFields(initial, values), [initial, values]);
   const stuck = React.useMemo(() => unsendableChanges(initial, values), [initial, values]);
   const sendable = Object.keys(fields).length > 0;
-  // `lat` and `lng` share one label ("Map location"), so a cleared pair must not
-  // be listed twice.
   const stuckLabels = [...new Set(stuck.map(fieldLabel))];
 
   React.useEffect(() => {
@@ -237,26 +238,6 @@ export function ApplicationForm({
             placeholder="Ward 4, near Baluwatar chowk"
           />
           <TextField
-            id="lat"
-            label="Latitude"
-            hint="Optional. From your phone's map, if you have it. Can be corrected later but not emptied."
-            value={values.lat}
-            onChange={(v) => set("lat", v)}
-            problem={problem("lat")}
-            inputMode="decimal"
-            placeholder="27.7269"
-          />
-          <TextField
-            id="lng"
-            label="Longitude"
-            hint="Optional. Can be corrected later but not emptied."
-            value={values.lng}
-            onChange={(v) => set("lng", v)}
-            problem={problem("lng")}
-            inputMode="decimal"
-            placeholder="85.3320"
-          />
-          <TextField
             id="deliveryRadiusKm"
             label="How far you deliver (km)"
             value={values.deliveryRadiusKm}
@@ -266,6 +247,19 @@ export function ApplicationForm({
             hint="You deliver your own orders on GoPasal. Choose a distance you can actually manage. It can be changed but not emptied."
           />
         </div>
+        <ShopLocationCapture
+          target={{ kind: "application", id: app.id }}
+          current={{
+            lat: app.lat,
+            lng: app.lng,
+            accuracyM: app.locationAccuracyM,
+            capturedAt: app.locationCapturedAt,
+          }}
+          editable={app.canEdit}
+          problem={problemFor("location") ?? problemFor("lat") ?? problemFor("lng")}
+          optional
+          onCaptured={onLocationCaptured}
+        />
         <div className="rounded-xl border border-ink-100 bg-ink-50/60 p-4">
           <CheckField
             id="soloMode"
@@ -314,7 +308,8 @@ export function ApplicationForm({
           <TextField
             id="registrationNo"
             label="Business registration number"
-            hint="Optional — most neighbourhood shops have none, and that is fine."
+            required
+            hint="As printed on your current company, firm, industry or local business registration certificate."
             value={values.registrationNo}
             onChange={(v) => set("registrationNo", v)}
             problem={problem("registrationNo")}
@@ -322,7 +317,8 @@ export function ApplicationForm({
           <TextField
             id="panNo"
             label="PAN number"
-            hint="Optional."
+            required
+            hint="The business PAN issued by the Inland Revenue Department."
             value={values.panNo}
             onChange={(v) => set("panNo", v)}
             problem={problem("panNo")}
@@ -331,7 +327,7 @@ export function ApplicationForm({
           <TextField
             id="vatNo"
             label="VAT number"
-            hint="Optional — only if you are VAT registered."
+            hint="Only if VAT-registered. Entering it makes the VAT certificate required."
             value={values.vatNo}
             onChange={(v) => set("vatNo", v)}
             problem={problem("vatNo")}

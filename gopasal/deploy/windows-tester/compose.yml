@@ -1,0 +1,154 @@
+name: gopasal-tester
+
+x-api-environment: &api-environment
+  APP_ENV: local
+  NODE_ENV: production
+  PORT: "4000"
+  API_PREFIX: api
+  DATABASE_URL: postgresql://gopasal:${GOPASAL_DB_PASSWORD}@postgres:5432/gopasal?schema=public
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  JWT_ACCESS_SECRET: ${GOPASAL_JWT_ACCESS_SECRET}
+  JWT_REFRESH_SECRET: ${GOPASAL_JWT_REFRESH_SECRET}
+  CORS_ORIGINS: http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost:3003
+  PUBLIC_URL: http://localhost:4000
+  CUSTOMER_WEB_URL: http://localhost:3000
+  TRUST_PROXY: "false"
+  API_DOCS_ENABLED: "false"
+  METRICS_ENABLED: "false"
+  SMS_PROVIDER: log
+  MAP_PROVIDER: osm
+  PUSH_PROVIDER: log
+  STORAGE_PROVIDER: local
+  STORAGE_LOCAL_DIR: /app/apps/api/uploads
+  SUPPORT_ASSISTANT_PROVIDER: knowledge
+  MALWARE_SCAN_PROVIDER: disabled
+  PAYMENTS_COD_ENABLED: "true"
+
+x-web-healthcheck: &web-healthcheck
+  interval: 5s
+  timeout: 4s
+  retries: 24
+  start_period: 15s
+
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: gopasal
+      POSTGRES_PASSWORD: ${GOPASAL_DB_PASSWORD}
+      POSTGRES_DB: gopasal
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gopasal -d gopasal"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    image: ghcr.io/bibek-kumar-thagunna/gopasal-tester-api:${GOPASAL_IMAGE_TAG:-latest}
+    environment: *api-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["./node_modules/.bin/prisma", "migrate", "deploy", "--schema=prisma/schema.prisma"]
+    restart: "no"
+
+  seed:
+    image: ghcr.io/bibek-kumar-thagunna/gopasal-tester-api:${GOPASAL_IMAGE_TAG:-latest}
+    profiles: ["tools"]
+    environment: *api-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["node", "prisma/seed.js"]
+    restart: "no"
+
+  api:
+    image: ghcr.io/bibek-kumar-thagunna/gopasal-tester-api:${GOPASAL_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment: *api-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:4000:4000"
+    volumes:
+      - uploads-data:/app/apps/api/uploads
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/api/v1/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 4s
+      retries: 24
+      start_period: 20s
+
+  customer:
+    image: ghcr.io/bibek-kumar-thagunna/gopasal-tester-customer:${GOPASAL_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:3000:3000"
+    healthcheck:
+      <<: *web-healthcheck
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+
+  seller:
+    image: ghcr.io/bibek-kumar-thagunna/gopasal-tester-seller:${GOPASAL_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:3001:3001"
+    healthcheck:
+      <<: *web-healthcheck
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/login').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+
+  admin:
+    image: ghcr.io/bibek-kumar-thagunna/gopasal-tester-admin:${GOPASAL_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:3002:3002"
+    healthcheck:
+      <<: *web-healthcheck
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3002/login').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+
+  rider:
+    image: ghcr.io/bibek-kumar-thagunna/gopasal-tester-rider:${GOPASAL_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:3003:3003"
+    healthcheck:
+      <<: *web-healthcheck
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3003/login').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+
+volumes:
+  postgres-data:
+  redis-data:
+  uploads-data:

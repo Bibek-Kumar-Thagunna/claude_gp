@@ -8,15 +8,23 @@ import { t } from "@/lib/i18n";
 import { Button } from "@/components/primitives";
 import { PhoneMockup } from "@/components/PhoneMockup";
 import { fadeUp, stagger } from "@/lib/motion";
+import { useRouter } from "next/navigation";
 
 const STATS = [
-  { icon: StoreIcon, value: "1,200+", label: "Local shops" },
-  { icon: MapPin, value: "18", label: "Cities" },
-  { icon: ShieldCheck, value: "Verified", label: "Trusted sellers" },
+  { icon: StoreIcon, value: "Local", label: "Neighbourhood shops" },
+  { icon: MapPin, value: "Shop-led", label: "Local delivery" },
+  { icon: ShieldCheck, value: "Verified", label: "Active sellers" },
 ];
 
 export function Hero() {
   const { lang } = useLang();
+  const router = useRouter();
+  const [query, setQuery] = React.useState("");
+  const submitSearch = (event: React.FormEvent) => {
+    event.preventDefault();
+    const q = query.trim();
+    router.push(q ? `/shops?q=${encodeURIComponent(q)}` : "/shops");
+  };
 
   return (
     <section className="relative overflow-x-clip">
@@ -32,7 +40,7 @@ export function Hero() {
       <div className="pointer-events-none absolute -right-32 -top-28 -z-10 h-[30rem] w-[30rem] rounded-full bg-crimson-200/50 blur-3xl" />
       <div className="pointer-events-none absolute -left-24 top-44 -z-10 h-72 w-72 rounded-full bg-[#F6A609]/10 blur-3xl" />
 
-      <div className="gp-container grid items-center gap-12 py-12 md:py-16 lg:grid-cols-[1.05fr_0.95fr] lg:py-20">
+      <div className="gp-container grid items-center gap-12 py-10 sm:py-12 md:py-16 lg:grid-cols-[1.05fr_0.95fr] lg:py-20">
         {/* left — copy, search, stats */}
         <motion.div variants={stagger} initial="hidden" animate="show">
           <motion.div variants={fadeUp}>
@@ -43,7 +51,7 @@ export function Hero() {
 
           <motion.h1
             variants={fadeUp}
-            className="mt-5 text-7xl font-extrabold leading-[1.05] text-ink-900"
+            className="mt-5 text-4xl font-extrabold leading-[1.05] text-ink-900 sm:text-5xl lg:text-6xl xl:text-7xl"
           >
             {t("heroTitle", lang)}
           </motion.h1>
@@ -64,19 +72,21 @@ export function Hero() {
 
           {/* search */}
           <motion.div variants={fadeUp} className="mt-7 max-w-xl">
-            <div className="flex items-center gap-2 rounded-full border border-ink-200 bg-white p-2 shadow-card">
+            <form onSubmit={submitSearch} role="search" className="flex items-center gap-2 rounded-full border border-ink-200 bg-white p-2 shadow-card">
               <div className="flex flex-1 items-center gap-2 pl-3">
                 <Search className="h-5 w-5 shrink-0 text-ink-400" />
                 <input
                   type="search"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
                   placeholder={t("searchPlaceholder", lang)}
                   className="w-full bg-transparent py-2 text-sm outline-none md:text-base"
                 />
               </div>
-              <Button size="md" className="shrink-0">
-                <MapPin className="h-4 w-4" /> {t("useLocation", lang)}
+              <Button type="submit" size="md" className="shrink-0">
+                <Search className="h-4 w-4" /> Search shops
               </Button>
-            </div>
+            </form>
           </motion.div>
 
           {/* honest no-ETA reassurance */}
@@ -108,10 +118,11 @@ export function Hero() {
 
         {/* right — live phone mockup */}
         <motion.div
+          aria-hidden="true"
           initial={{ opacity: 0, scale: 0.94, y: 12 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1], delay: 0.15 }}
-          className="order-first lg:order-none"
+          className="hidden lg:block"
         >
           <PhoneMockup />
         </motion.div>

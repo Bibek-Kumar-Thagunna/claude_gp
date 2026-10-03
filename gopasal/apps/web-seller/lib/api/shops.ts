@@ -63,6 +63,9 @@ export type SellerShopWire = {
   fullAddress: string | null;
   lat: number | null;
   lng: number | null;
+  locationAccuracyM: number | null;
+  locationCapturedAt: string | null;
+  locationCaptureMethod: string | null;
   deliveryRadiusKm: number;
 
   hours: string | null;
@@ -90,6 +93,12 @@ export type SellerShopWire = {
   /** The caller's own role on this shop, from the membership row. */
   myRole: { name: string; isPrivileged: boolean };
   _count: { products: number; orders: number };
+  /** Why an approved shop is or is not currently discoverable by customers. */
+  storefront: {
+    visible: boolean;
+    blockers: Array<"APPROVAL" | "VERIFIED_LOCATION" | "DELIVERABLE_PRODUCT">;
+    deliverableProductCount: number;
+  };
 };
 
 /**
@@ -117,15 +126,15 @@ export function listMyShops(signal?: AbortSignal): Promise<SellerShopWire[]> {
  *  - **`null` is not a value.** Every field is `@ValidateIf(v !== undefined)`, so
  *    `null` falls through to `@IsString()`/`@IsNumber()` and is answered with a
  *    400. Omit a key to leave its column alone; send `""` to clear a nullable text
- *    column. `categoryId`, `lat` and `lng` can therefore be *changed* but not
- *    emptied — the API has no spelling for "unset this".
+ *    column. `categoryId` can therefore be changed but not emptied. The shop pin
+ *    is replaced only through the phone location-capture endpoint.
  *  - **Numbers and booleans must be real ones.** Body validation runs without
  *    implicit conversion, so `"27.7"` and `"true"` are 400s. Parse before sending.
  *
  * Server-side bounds, mirrored here only as documentation — the API is the one that
  * enforces them: `name` 2–120 characters; `nameNp` ≤ 120; `description` ≤ 1000;
  * `categoryId` ≤ 60; `phone` ≤ 20; `area` ≤ 160; `fullAddress` ≤ 300; `hours` ≤ 120;
- * `emoji` ≤ 16; `lat`/`lng` real coordinates; `deliveryRadiusKm` 0.5–20;
+ * `emoji` ≤ 16; `deliveryRadiusKm` 0.5–20;
  * `minOrder` a whole number ≥ 0.
  */
 export type ShopUpdateBody = {
@@ -136,8 +145,6 @@ export type ShopUpdateBody = {
   phone?: string;
   area?: string;
   fullAddress?: string;
-  lat?: number;
-  lng?: number;
   deliveryRadiusKm?: number;
   emoji?: string;
   hours?: string;
@@ -155,7 +162,7 @@ export type ShopUpdateBody = {
  * shop context refreshed reloads it (`useShops().reload()`) rather than patching the
  * list from this response.
  */
-export type ShopRowWire = Omit<SellerShopWire, "myRole" | "_count">;
+export type ShopRowWire = Omit<SellerShopWire, "myRole" | "_count" | "storefront">;
 
 /**
  * Save shop settings.

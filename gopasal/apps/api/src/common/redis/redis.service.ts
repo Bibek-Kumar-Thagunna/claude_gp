@@ -81,6 +81,11 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   /** A fresh connection with identical options (for pub/sub). */
   duplicate(): Redis {
     const conn = this.client.duplicate();
+    // ioredis does not copy EventEmitter listeners to duplicates. Socket.IO
+    // closes its adapter while Nest is also tearing down providers, so a final
+    // unsubscribe can race the socket close and emit EPIPE. Always consume and
+    // attribute that error instead of letting Node report an unhandled event.
+    conn.on('error', (e) => this.logger.error(`Redis duplicate error: ${e.message}`));
     this.extras.push(conn);
     return conn;
   }

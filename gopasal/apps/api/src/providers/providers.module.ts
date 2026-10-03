@@ -3,6 +3,8 @@ import { mapProviderFactory } from './map.provider';
 import { paymentProvidersFactory } from './payment.provider';
 import { pushProviderFactory } from './push.provider';
 import { storageProviderFactory } from './storage.provider';
+import { supportAssistantProviderFactory } from './support-assistant.provider';
+import { malwareScannerFactory } from './malware-scanner.provider';
 
 /**
  * All external-service abstractions in one global module. Every dependency
@@ -16,7 +18,9 @@ import { storageProviderFactory } from './storage.provider';
     paymentProvidersFactory,
     pushProviderFactory,
     storageProviderFactory,
+    supportAssistantProviderFactory,
+    malwareScannerFactory,
   ],
-  exports: [mapProviderFactory, paymentProvidersFactory, pushProviderFactory, storageProviderFactory],
+  exports: [mapProviderFactory, paymentProvidersFactory, pushProviderFactory, storageProviderFactory, supportAssistantProviderFactory, malwareScannerFactory],
 })
 export class ProvidersModule {}

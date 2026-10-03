@@ -89,6 +89,9 @@ export function inviteDelivery(invite: InviteWire): {
   if (!d) return { state: "unknown", detail: null };
   if (d === "sent") return { state: "sent", detail: null };
   if (d.startsWith("failed")) return { state: "failed", detail: d.replace(/^failed:\s*/, "") };
+  if (d.startsWith("development")) {
+    return { state: "failed", detail: "local SMS delivery is switched off" };
+  }
   // Anything else is a value this build has not seen. It is reported as unknown
   // with the raw string, rather than guessed at: there used to be a `"queued"`
   // arm here that treated a value `InvitesService.deliver` never writes as a

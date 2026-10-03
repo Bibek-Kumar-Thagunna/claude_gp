@@ -86,7 +86,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const stored = getSession();
     setLocalSession(stored);
     if (!stored) setStatus("anonymous");
-    const stopSubscribe = subscribe(setLocalSession);
+    let hasSession = Boolean(stored);
+    const stopSubscribe = subscribe((next) => {
+      const hadSession = hasSession;
+      hasSession = Boolean(next);
+      setLocalSession(next);
+      if (!next) {
+        setMe(null);
+        setError(null);
+        setStatus("anonymous");
+      } else if (!hadSession) {
+        setStatus("loading");
+      }
+    });
     const stopStorage = watchStorage();
     return () => {
       stopSubscribe();
@@ -123,7 +135,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const sessionKey = session?.accessToken ?? null;
+  // Browser refresh credentials are HttpOnly. After a reload the persisted
+  // shell has a user snapshot but deliberately has no JavaScript-readable
+  // access token; the first request must still run so it can rotate the cookie.
+  const sessionKey = session?.user.id ?? null;
   React.useEffect(() => {
     if (!sessionKey) return;
     const controller = new AbortController();

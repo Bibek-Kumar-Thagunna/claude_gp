@@ -15,6 +15,12 @@ import { MAP_PROVIDER, type MapProvider } from './providers/map.provider';
 import { PUSH_PROVIDER, type PushProvider } from './providers/push.provider';
 import { LocalStorageProvider, STORAGE_PROVIDER, type StorageProvider } from './providers/storage.provider';
 import { SMS_PROVIDER, type SmsProvider } from './auth/sms.provider';
+import {
+  SUPPORT_ASSISTANT_PROVIDER,
+  type SupportAssistantProvider,
+} from './providers/support-assistant.provider';
+import { MALWARE_SCANNER, type MalwareScanner } from './providers/malware-scanner.provider';
+import { configureRealtimeOrigins } from './realtime/ws-auth';
 
 // PostGIS / $queryRaw counts arrive as BigInt — make them JSON-safe globally.
 (BigInt.prototype as unknown as { toJSON: () => number }).toJSON = function () {
@@ -31,13 +37,28 @@ async function bootstrap(): Promise<void> {
   const apiPrefix = config.get('apiPrefix', { infer: true });
   const corsOrigins = config.get('corsOrigins', { infer: true });
   const port = config.get('port', { infer: true });
+  const trustProxy = config.get('trustProxy', { infer: true });
 
+  app.set('trust proxy', trustProxy);
+  configureRealtimeOrigins(corsOrigins);
   app.use(helmet({ crossOriginResourcePolicy: false }));
   app.enableCors({
     origin: corsOrigins,
     credentials: true,
     methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Shop-Id'],
+    // `Idempotency-Key` belongs here or the feature is native-only: a browser
+    // sending it triggers a preflight, and a header missing from this list fails
+    // that preflight outright — so the request never leaves the page. The phone
+    // apps are unaffected (no origin, no preflight), which is exactly how a gap
+    // like this stays hidden until a web console tries to place an order safely.
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-Shop-Id',
+      'Idempotency-Key',
+      'X-GoPasal-Auth-Mode',
+      'X-GoPasal-Auth-Surface',
+    ],
   });
 
   app.setGlobalPrefix(apiPrefix);
@@ -112,10 +133,13 @@ async function bootstrap(): Promise<void> {
   const sms = app.get<SmsProvider>(SMS_PROVIDER);
   const maps = app.get<MapProvider>(MAP_PROVIDER);
   const push = app.get<PushProvider>(PUSH_PROVIDER);
+  const supportAssistant = app.get<SupportAssistantProvider>(SUPPORT_ASSISTANT_PROVIDER);
+  const malwareScanner = app.get<MalwareScanner>(MALWARE_SCANNER);
   const logger = new Logger('Bootstrap');
   logger.log(
     `providers → sms=${sms.name}${sms.delivers ? '' : ' (not delivered)'} storage=${storage.name} ` +
-      `maps=${maps.name} push=${push.name}${push.delivers ? '' : ' (not delivered)'}`,
+      `maps=${maps.name} push=${push.name}${push.delivers ? '' : ' (not delivered)'} ` +
+      `supportAssistant=${supportAssistant.name} malwareScanner=${malwareScanner.name}`,
   );
   logger.log(
     `GoPasal API ready → ${config.get('publicUrl', { infer: true })}/${apiPrefix}` +

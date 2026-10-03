@@ -129,7 +129,7 @@ export function toDeliveryRiders(wire: ShopRiderWire[]): DeliveryRider[] {
  * them, and both accept `POST .../assign`, so they share a lane until a rider
  * takes them.
  */
-export type DeliveryLane = "ready" | "with_rider" | "on_the_way" | "closed";
+export type DeliveryLane = "ready" | "with_rider" | "on_the_way" | "returns" | "closed";
 
 export const DELIVERY_LANES: {
   id: DeliveryLane;
@@ -140,7 +140,7 @@ export const DELIVERY_LANES: {
   {
     id: "ready",
     label: "Needs a rider",
-    hint: "Accepted or packed, nobody carrying it yet.",
+    hint: "Ready for assignment, including delivery reattempts.",
     tone: "marigold",
   },
   {
@@ -149,11 +149,22 @@ export const DELIVERY_LANES: {
     hint: "Assigned or picked up — dispatch it to send it out.",
     tone: "blue",
   },
-  { id: "on_the_way", label: "Out for delivery", hint: "On its way to the buyer.", tone: "crimson" },
+  {
+    id: "on_the_way",
+    label: "Out for delivery",
+    hint: "On its way to the buyer.",
+    tone: "crimson",
+  },
+  {
+    id: "returns",
+    label: "Returning",
+    hint: "Failed after pickup; recover the parcel before any next attempt.",
+    tone: "marigold",
+  },
   {
     id: "closed",
     label: "Recently finished",
-    hint: "Handed over, or the leg failed. The newest few, not a full history.",
+    hint: "Successfully handed over. The newest few, not a full history.",
     tone: "green",
   },
 ];
@@ -169,10 +180,13 @@ export const DELIVERY_LANES: {
 function deliveryLane(o: SellerOrder): DeliveryLane | null {
   if (o.status === "PLACED" || o.status === "CANCELLED" || o.status === "REJECTED") return null;
   if (o.status === "DELIVERED") return "closed";
-  // A failed leg is terminal in the API's delivery machine and cannot be retried
-  // or reassigned, so it belongs with the finished work, not with live orders.
-  if (o.deliveryStatus === "FAILED" || o.deliveryStatus === "DELIVERED") return "closed";
-  if (o.status === "OUT_FOR_DELIVERY") return "on_the_way";
+  if ((o.deliveryStatus === "FAILED" && o.pickedUpAt) || o.deliveryStatus === "RETURNING_TO_SHOP")
+    return "returns";
+  if (o.deliveryStatus === "FAILED" || o.deliveryStatus === "RETURNED_TO_SHOP") return "ready";
+  if (o.deliveryStatus === "DELIVERED") return "closed";
+  if (o.deliveryStatus === "EN_ROUTE" || (o.status === "OUT_FOR_DELIVERY" && !o.deliveryStatus))
+    return "on_the_way";
+  if (o.deliveryStatus === "ASSIGNED" || o.deliveryStatus === "PICKED_UP") return "with_rider";
   return o.rider ? "with_rider" : "ready";
 }
 
@@ -192,7 +206,13 @@ export type DeliveryBoard = Record<DeliveryLane, SellerOrder[]>;
  * few rather than as everything finished.
  */
 export function toDeliveryBoard(orders: SellerOrder[]): DeliveryBoard {
-  const board: DeliveryBoard = { ready: [], with_rider: [], on_the_way: [], closed: [] };
+  const board: DeliveryBoard = {
+    ready: [],
+    with_rider: [],
+    on_the_way: [],
+    returns: [],
+    closed: [],
+  };
   for (const o of orders) {
     const lane = deliveryLane(o);
     if (lane) board[lane].push(o);
@@ -217,6 +237,8 @@ const STEP_LABELS: Record<DeliveryStatusWire, string> = {
   EN_ROUTE: "On the way",
   DELIVERED: "Handed over",
   FAILED: "Could not deliver",
+  RETURNING_TO_SHOP: "Start return",
+  RETURNED_TO_SHOP: "Confirm parcel returned",
 };
 
 /** The button text for moving a leg to `to`. */
@@ -349,8 +371,11 @@ export function parsePolygonText(text: string): PolygonParse {
     }
     points.push({ lat, lng });
   }
+  if (points.length > 50) {
+    return { points, error: "A zone can have at most 50 points. Remove unnecessary corners." };
+  }
   if (points.length < 3) {
-    return { points: [], error: "A zone needs at least 3 points to enclose an area." };
+    return { points, error: "A zone needs at least 3 points to enclose an area." };
   }
   return { points, error: null };
 }

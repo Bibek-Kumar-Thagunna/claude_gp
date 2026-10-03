@@ -245,7 +245,13 @@ export function ApplicationDetail({
             {decidable && (
               <>
                 <Can perm="shops.approve">
-                  <Button size="sm" disabled={working} onClick={() => setPending("approve")}>
+                  <Button
+                    size="sm"
+                    disabled={
+                      working || app.missing.length > 0 || app.approvalMissingDocuments.length > 0
+                    }
+                    onClick={() => setPending("approve")}
+                  >
                     {busy === "approve" ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
                     ) : (
@@ -320,7 +326,7 @@ export function ApplicationDetail({
                 height={220}
               />
             ) : (
-              <InlineWarning message="No map location has been set, so the delivery area cannot be checked yet." />
+              <InlineWarning message="Location was skipped during registration. Approval may continue, but this shop will remain hidden from customers until the seller adds a verified shop pin after approval." />
             )}
 
             <div className="mt-4 divide-y divide-ink-100">
@@ -336,6 +342,11 @@ export function ApplicationDetail({
                 </span>
               </KeyValue>
               <KeyValue label="Full address">{dash(app.fullAddress)}</KeyValue>
+              <KeyValue label="Location evidence">
+                {app.locationCapturedAt
+                  ? `${fullDateTime(app.locationCapturedAt)} · ${app.locationAccuracyM !== null ? `±${Math.round(app.locationAccuracyM)} m` : "accuracy unavailable"} · ${app.locationCaptureMethod === "HANDOFF" ? "phone handoff" : "applicant’s phone"}`
+                  : "Not captured from a phone"}
+              </KeyValue>
               <KeyValue label="Delivery coverage">{app.deliveryRadiusKm} km</KeyValue>
               <KeyValue label="Opening hours">{dash(app.hours)}</KeyValue>
               <KeyValue label="Who delivers">
@@ -434,7 +445,10 @@ export function ApplicationDetail({
               applicationId={app.id}
               documents={app.documents}
               missingDocuments={app.missingDocuments}
+              approvalMissingDocuments={app.approvalMissingDocuments}
               payoutMethod={app.payout.payoutMethod}
+              vatNo={app.kyc.vatNo}
+              categorySlug={app.category?.slug ?? null}
               decidable={decidable}
               onReviewed={reload}
             />
@@ -537,7 +551,7 @@ export function ApplicationDetail({
           void approve(note);
         }}
         title={`Approve ${app.shopName ?? "this application"}?`}
-        description="This creates the shop, makes the applicant its Owner and lets them start listing. The shop is not visible to customers until they open it themselves."
+        description="Confirm that the registration, tax identity, owner identity, shop evidence, payout proof and any sector licence have all been opened and accepted. This creates the shop and makes the applicant its Owner."
         confirmLabel="Approve"
         reasonLabel="Note to the applicant (optional)"
       />

@@ -1,0 +1,53 @@
+# syntax=docker/dockerfile:1.7
+FROM node:22.23.3-bookworm-slim AS build
+ARG APP_ENV=production
+ENV APP_ENV=$APP_ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends ca-certificates openssl \
+    && rm -rf /var/lib/apt/lists/*
+RUN corepack enable && corepack prepare pnpm@9.7.0 --activate
+WORKDIR /app
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.base.json ./
+COPY apps/api/package.json apps/api/package.json
+COPY apps/api/prisma/schema.prisma apps/api/prisma/schema.prisma
+COPY packages/api-client/package.json packages/api-client/package.json
+COPY packages/tokens/package.json packages/tokens/package.json
+COPY packages/ui/package.json packages/ui/package.json
+RUN pnpm install --frozen-lockfile
+COPY apps/api apps/api
+COPY packages packages
+RUN pnpm --filter @gopasal/api build
+# The Windows tester uses the same production API image, but needs a one-shot,
+# idempotent seed command on the very first start. Compile the seed (and its
+# permission catalogue dependency) to plain CommonJS so the runtime image does
+# not need ts-node, TypeScript, or the rest of the development toolchain.
+RUN pnpm --filter @gopasal/api exec tsc prisma/seed.ts \
+    --outDir /tmp/gopasal-seed \
+    --module commonjs \
+    --target es2022 \
+    --esModuleInterop \
+    --skipLibCheck \
+    --moduleResolution node \
+    --resolveJsonModule
+# Produce an isolated production dependency graph. Prisma's CLI is deliberately
+# a runtime dependency because this same immutable image executes the reviewed
+# `prisma migrate deploy` release Job; compilers, linters and test tools are not.
+RUN pnpm --filter @gopasal/api deploy --prod /prod/api
+RUN install -D /tmp/gopasal-seed/prisma/seed.js /prod/api/prisma/seed.js \
+    && install -D /tmp/gopasal-seed/src/rbac/permissions.catalog.js /prod/api/src/rbac/permissions.catalog.js
+# `pnpm deploy` runs lifecycle scripts from the source workspace. Generate once
+# more from the isolated tree so `.prisma/client` is packaged beside the runtime
+# that resolves it (and fail the image build if that contract ever changes).
+RUN cd /prod/api && ./node_modules/.bin/prisma generate --schema=prisma/schema.prisma
+
+FROM node:22.23.3-bookworm-slim AS runtime
+ENV APP_ENV=production NODE_ENV=production PORT=4000
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends ca-certificates openssl \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY --from=build --chown=node:node /prod/api ./apps/api
+USER node
+WORKDIR /app/apps/api
+EXPOSE 4000 9464
+CMD ["node", "dist/main.js"]

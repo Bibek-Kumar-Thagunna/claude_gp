@@ -83,6 +83,11 @@ export type RequestOtpResult = {
    * text message is on its way.
    */
   delivered: boolean;
+  /**
+   * Present only when the API is explicitly running in development with the
+   * non-delivering log transport. It is the real OTP, not an auth bypass.
+   */
+  developmentCode?: string;
 };
 
 /**
@@ -149,6 +154,7 @@ export const DOCUMENT_KINDS = [
   "PAN_CERTIFICATE",
   "VAT_CERTIFICATE",
   "BUSINESS_LICENCE",
+  "REGULATORY_LICENCE",
   "SHOP_PHOTO",
   "OWNER_PHOTO",
   "BANK_PROOF",

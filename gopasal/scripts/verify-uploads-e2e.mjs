@@ -461,6 +461,8 @@ async function main() {
     ['delete', 'seller/onboarding/applications/{applicationId}/documents/{documentId}'],
     ['get', 'admin/onboarding/applications/{applicationId}/documents/{documentId}/file'],
     ['post', 'admin/onboarding/applications/{applicationId}/documents/{documentId}/review'],
+    ['post', 'seller/onboarding/applications/{applicationId}/location-captures'],
+    ['post', 'public/location-captures/{token}'],
   ];
   for (const [method, tail] of required) {
     const key = paths.find((p) => p.endsWith(tail));
@@ -468,7 +470,7 @@ async function main() {
     if (!openapi.paths[key][method]) fail(`${key} exists but has no ${method.toUpperCase()}`);
     pass(`${method.toUpperCase()} ${key}`);
   }
-  record('Routes', `${required.length}/5 document routes present under ${BASE}`);
+  record('Routes', `${required.length}/${required.length} required onboarding routes present under ${BASE}`);
   // ── identities ─────────────────────────────────────────────────────────────
   head('identities (real OTP sign-in, no bypass)');
   const applicantPhone = freshPhone();
@@ -508,6 +510,8 @@ async function main() {
       fullAddress: 'Ward 10, New Baneshwor, Kathmandu',
       ownerName: 'E2E Verification Owner',
       citizenshipNo: '12-34-56-78901',
+      registrationNo: 'REG-E2E-12345',
+      panNo: '123456789',
       payoutMethod: 'BANK',
       bankName: 'Nabil Bank',
       bankAccountNo: '01234567890123',
@@ -521,6 +525,12 @@ async function main() {
   DOC_DIR = join(STORAGE_DIR, 'private', 'shop-applications', appId);
   pass(`application ${created.json.reference} (${appId}) in status ${created.json.status}`);
   info(`documents will land in ${DOC_DIR}`);
+
+  // Location is intentionally absent. Registration must remain submittable and
+  // approvable; the customer storefront gate, tested after approval below, is
+  // where the verified pin becomes mandatory.
+  eq(created.json?.locationCapturedAt ?? null, null, 'optional registration location');
+  pass('registration can continue with location skipped');
   // ── 9 (first half) · submit is refused with no documents ───────────────────
   head('9 · submission refused while the KYC set is missing');
   const bare = await http(`/seller/onboarding/applications/${appId}/submit`, {
@@ -530,7 +540,7 @@ async function main() {
     expect: 400,
   });
   const missingNow = [...(bare.json?.missingDocuments ?? [])].sort();
-  eq(missingNow, ['BANK_PROOF', 'CITIZENSHIP_BACK', 'CITIZENSHIP_FRONT', 'SHOP_PHOTO'], 'missingDocuments');
+  eq(missingNow, ['BANK_PROOF', 'BUSINESS_LICENCE', 'CITIZENSHIP_BACK', 'CITIZENSHIP_FRONT', 'PAN_CERTIFICATE', 'SHOP_PHOTO'], 'missingDocuments');
   eq(bare.json?.missing ?? [], [], 'missing (typed fields)');
   record('Submit without documents', `400 — missingDocuments ${missingNow.join(', ')}`);
 
@@ -648,6 +658,8 @@ async function main() {
   const bytesByKind = {
     CITIZENSHIP_FRONT: jpegBytes('citizenship-front-2'),
     CITIZENSHIP_BACK: jpegBytes('citizenship-back'),
+    BUSINESS_LICENCE: jpegBytes('business-registration'),
+    PAN_CERTIFICATE: jpegBytes('business-pan'),
     SHOP_PHOTO: jpegBytes('shop-front'),
   };
   const docIds = {};
@@ -682,7 +694,7 @@ async function main() {
   if (!bankName) fail('BANK_PROOF was accepted but its bytes are not on disk');
   if (!/^[0-9a-f]{32}\.pdf$/.test(bankName)) fail(`the PDF was stored as ${bankName}`);
   pass(`BANK_PROOF stored as ${bankName} (extension from the sniffed type)`);
-  eq(onDisk().length, 4, 'objects on disk for the complete set');
+  eq(onDisk().length, 6, 'objects on disk for the complete set');
 
   // The replacement invariant, at runtime rather than in a unit test: re-taking the
   // shop photo must leave exactly one shop photo, and the superseded bytes must be
@@ -695,7 +707,7 @@ async function main() {
   );
   if (replaced.json.id === docIds.SHOP_PHOTO) fail('the replacement reused the superseded document id');
   docIds.SHOP_PHOTO = replaced.json.id;
-  eq(onDisk().length, 4, 'objects on disk after the replacement');
+  eq(onDisk().length, 6, 'objects on disk after the replacement');
   if (findBytes(bytesByKind.SHOP_PHOTO)) fail('the superseded shop photo is still on disk');
   pass('the superseded object was removed');
   if (!findBytes(reshot)) fail('the replacement bytes are not on disk');
@@ -705,7 +717,7 @@ async function main() {
     expect: 200,
   });
   const kinds = (setNow.json?.documents ?? []).map((d) => d.kind).sort();
-  eq(kinds, ['BANK_PROOF', 'CITIZENSHIP_BACK', 'CITIZENSHIP_FRONT', 'SHOP_PHOTO'], 'attached kinds');
+  eq(kinds, ['BANK_PROOF', 'BUSINESS_LICENCE', 'CITIZENSHIP_BACK', 'CITIZENSHIP_FRONT', 'PAN_CERTIFICATE', 'SHOP_PHOTO'], 'attached kinds');
   eq(setNow.json?.missingDocuments ?? [], [], 'missingDocuments once the set is complete');
   record('Replacement', 'one object per kind kept; superseded bytes deleted from disk');
 
@@ -723,7 +735,7 @@ async function main() {
   eq(submitted.json?.missingDocuments ?? [], [], 'missingDocuments after submission');
   record(
     'Submit with documents',
-    `200 → SUBMITTED, terms v${submitted.json.terms.version}, 4 documents attached`,
+    `200 → SUBMITTED, terms v${submitted.json.terms.version}, 6 documents attached`,
   );
 
   // A submitted application is a record: it must stop accepting and stop losing
@@ -739,7 +751,7 @@ async function main() {
     expect: 409,
   });
   pass('deleting from a submitted application → 409');
-  eq(onDisk().length, 4, 'objects on disk after the refused writes');
+  eq(onDisk().length, 6, 'objects on disk after the refused writes');
 
   // ── 11 · the reviewer can open and judge the document ─────────────────────
   head('11 · reviewer access with shops.view / shops.approve');
@@ -748,7 +760,7 @@ async function main() {
     expect: 200,
   });
   eq(forReview.json?.status, 'SUBMITTED', 'status seen by the reviewer');
-  eq((forReview.json?.documents ?? []).length, 4, 'documents visible to the reviewer');
+  eq((forReview.json?.documents ?? []).length, 6, 'documents visible to the reviewer');
   truthy(forReview.json?.kyc?.citizenshipNo, 'the KYC number the reviewer must check against the scan');
   if ((forReview.json?.documents ?? []).some((d) => 'storageKey' in d)) {
     fail('the reviewer view leaks storageKey');
@@ -779,6 +791,14 @@ async function main() {
     { method: 'POST', token: reviewer.token, body: { decision: 'ACCEPTED' }, expect: [200, 201] },
   );
   eq(accepted.json?.review, 'ACCEPTED', 'document review state');
+  for (const kind of ['CITIZENSHIP_BACK', 'BUSINESS_LICENCE', 'PAN_CERTIFICATE', 'BANK_PROOF']) {
+    await http(`/admin/onboarding/applications/${appId}/documents/${docIds[kind]}/review`, {
+      method: 'POST',
+      token: reviewer.token,
+      body: { decision: 'ACCEPTED' },
+      expect: [200, 201],
+    });
+  }
   await http(`/admin/onboarding/applications/${appId}/documents/${docIds.CITIZENSHIP_FRONT}/review`, {
     method: 'POST',
     token: applicant.token,
@@ -836,7 +856,7 @@ async function main() {
   );
   eq(fixed.json?.review, 'PENDING', 'the replacement starts unreviewed');
   docIds.SHOP_PHOTO = fixed.json.id;
-  eq(onDisk().length, 4, 'objects on disk after the fix');
+  eq(onDisk().length, 6, 'objects on disk after the fix');
   if (findBytes(reshot)) fail('the rejected shop photo is still on disk');
   pass('the rejected object was replaced, not accumulated');
 
@@ -849,6 +869,13 @@ async function main() {
   eq(resubmitted.json?.status, 'SUBMITTED', 'status after resubmission');
   eq(resubmitted.json?.review?.submitCount, 2, 'submitCount');
 
+  await http(`/admin/onboarding/applications/${appId}/documents/${docIds.SHOP_PHOTO}/review`, {
+    method: 'POST',
+    token: reviewer.token,
+    body: { decision: 'ACCEPTED' },
+    expect: [200, 201],
+  });
+
   const approved = await http(`/admin/onboarding/applications/${appId}/approve`, {
     method: 'POST',
     token: reviewer.token,
@@ -858,8 +885,8 @@ async function main() {
   eq(approved.json?.status, 'APPROVED', 'status after approval');
   truthy(approved.json?.shop?.id, 'the shop created by the approval');
   truthy(approved.json?.shop?.slug, 'the shop slug');
-  eq((approved.json?.documents ?? []).length, 4, 'documents kept on the approved application');
-  eq(onDisk().length, 4, 'objects still on disk after approval');
+  eq((approved.json?.documents ?? []).length, 6, 'documents kept on the approved application');
+  eq(onDisk().length, 6, 'objects still on disk after approval');
 
   // Approving twice is a retry, not a second shop.
   const again = await http(`/admin/onboarding/applications/${appId}/approve`, {
@@ -870,6 +897,76 @@ async function main() {
   });
   eq(again.json?.shop?.id, approved.json.shop.id, 'the shop id on a repeated approval');
   pass('approval is idempotent — no second shop');
+
+  const shopId = approved.json.shop.id;
+  const shopSlug = approved.json.shop.slug;
+  await http(`/shops/${shopSlug}`, { expect: 404 });
+  const justApproved = await http('/seller/shops', { token: applicant.token, expect: 200 });
+  const privateShop = (justApproved.json ?? []).find((row) => row.id === shopId);
+  eq(privateShop?.storefront?.visible, false, 'customer visibility before fulfilment setup');
+  eq(
+    [...(privateShop?.storefront?.blockers ?? [])].sort(),
+    ['DELIVERABLE_PRODUCT', 'VERIFIED_LOCATION'],
+    'storefront blockers after approval',
+  );
+  pass('approved shop remains private without location and an orderable product');
+
+  await http(`/seller/shops/${shopId}`, {
+    method: 'PATCH',
+    token: applicant.token,
+    body: { lat: 27.7, lng: 85.35 },
+    expect: 400,
+  });
+  pass('typed coordinates on shop settings are refused → 400');
+  const updateLink = await http(`/seller/shops/${shopId}/location-captures`, {
+    method: 'POST',
+    token: applicant.token,
+    body: { mode: 'DIRECT' },
+    expect: [200, 201],
+  });
+  await http(`/public/location-captures/${updateLink.json.token}`, {
+    method: 'POST',
+    body: {
+      lat: 27.6941,
+      lng: 85.3397,
+      accuracyM: 9,
+      capturedAt: new Date().toISOString(),
+    },
+    expect: [200, 201],
+  });
+  const ownedShops = await http('/seller/shops', { token: applicant.token, expect: 200 });
+  const updatedShop = (ownedShops.json ?? []).find((row) => row.id === shopId);
+  eq(updatedShop?.lat, 27.6941, 'updated shop latitude');
+  eq(updatedShop?.locationAccuracyM, 9, 'updated shop location accuracy');
+  truthy(updatedShop?.locationCapturedAt, 'updated shop capture timestamp');
+  pass('approved shop location updated through the same phone-only flow');
+
+  await http(`/shops/${shopSlug}`, { expect: 404 });
+  pass('location alone does not publish an empty shop');
+  await http(`/seller/shops/${shopId}/products`, {
+    method: 'POST',
+    token: applicant.token,
+    body: {
+      name: 'E2E Deliverable Product',
+      price: 125,
+      trackStock: true,
+      stock: 5,
+    },
+    expect: [200, 201],
+  });
+  await http(`/shops/${shopSlug}`, { expect: 200 });
+  const publicDirectory = await http(`/shops?limit=100&q=${encodeURIComponent(shopName)}`, {
+    expect: 200,
+  });
+  truthy(
+    (publicDirectory.json?.data ?? []).some((row) => row.id === shopId),
+    'shop appears in customer directory once ready',
+  );
+  const readyShops = await http('/seller/shops', { token: applicant.token, expect: 200 });
+  const readyShop = (readyShops.json ?? []).find((row) => row.id === shopId);
+  eq(readyShop?.storefront?.visible, true, 'seller-facing customer visibility state');
+  pass('verified location plus one deliverable product publishes the shop');
+
   await uploadDocument(
     applicant.token, appId, 'OTHER', jpegBytes('after-approval'),
     'after-approval.jpg', 'image/jpeg', 409,

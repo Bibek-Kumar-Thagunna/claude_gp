@@ -13,6 +13,7 @@ import type {
 } from '@prisma/client';
 import type { PrismaService } from '../../common/prisma/prisma.service';
 import type { AppConfig } from '../../config/configuration';
+import { DisabledMalwareScanner } from '../../providers/malware-scanner.provider';
 import { LocalStorageProvider } from '../../providers/storage.provider';
 import type { AuditEntry, AuditService } from '../audit/audit.service';
 import type { UploadedFile } from '../uploads/uploaded-file';
@@ -290,7 +291,11 @@ describe('DocumentsService', () => {
   beforeEach(async () => {
     directory = await mkdtemp(join(tmpdir(), 'gopasal-kyc-'));
     const storage = new LocalStorageProvider(directory, 'http://localhost:4000');
-    uploads = new UploadsService(storage, configWith({ maxImageBytes: MB, maxDocumentBytes: 2 * MB }));
+    uploads = new UploadsService(
+      storage,
+      configWith({ maxImageBytes: MB, maxDocumentBytes: 2 * MB }),
+      new DisabledMalwareScanner(),
+    );
     db = new FakeDb({
       applications: [
         { id: APP, applicantId: SELLER, status: 'DRAFT' },
@@ -770,4 +775,3 @@ describe('DocumentsService', () => {
     }
   });
 });
-

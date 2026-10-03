@@ -2,6 +2,7 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import * as argon2 from 'argon2';
+import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../common/prisma/prisma.service';
 import type { AppConfig } from '../config/configuration';
 
@@ -46,7 +47,20 @@ export class TokenService {
         surface: ctx.surface,
         userAgent: ctx.userAgent,
         ip: ctx.ip,
-        refreshTokenHash: 'pending',
+        // Unique per session, not the literal 'pending'.
+        //
+        // `refreshTokenHash` is `@unique`, and the real hash cannot be computed
+        // until the row exists — the refresh token embeds the session id — so a
+        // placeholder is unavoidable. A *constant* placeholder is not: two
+        // sign-ins landing in the same window both inserted 'pending' and the
+        // second hit the unique index. That surfaced as P2002, which the
+        // exception filter maps to `409 A record with these details already
+        // exists.` — shown on a login screen, to a user whose only mistake was
+        // signing in at the same moment as somebody else. The window is not
+        // narrow either: `mint` hashes with argon2 before overwriting this, which
+        // is deliberately slow. Two different people, two different phones, and
+        // one of them simply could not log in.
+        refreshTokenHash: `pending:${randomUUID()}`,
         expiresAt: new Date(Date.now() + refreshTtl * 1000),
       },
     });
@@ -77,12 +91,32 @@ export class TokenService {
     }
 
     const user = await this.prisma.user.findUnique({ where: { id: claims.sub } });
-    if (!user || user.status !== 'ACTIVE') throw new UnauthorizedException('Account unavailable');
+    if (session.userId !== claims.sub || !user || user.status !== 'ACTIVE') {
+      throw new UnauthorizedException('Account unavailable');
+    }
 
-    await this.prisma.session.update({
-      where: { id: session.id },
-      data: { lastUsedAt: new Date(), userAgent: ctx.userAgent, ip: ctx.ip },
+    // argon2 verification creates a real concurrency window: two requests can
+    // both verify the same old hash before either rotates it. Claim the exact
+    // stored hash atomically, replacing it with a unique non-token marker. Only
+    // the winner may mint the next pair; the loser receives 401. If the process
+    // dies before mint completes, the session fails closed rather than leaving
+    // a reusable refresh token behind.
+    const previousHash = session.refreshTokenHash;
+    const claimed = await this.prisma.session.updateMany({
+      where: {
+        id: session.id,
+        refreshTokenHash: previousHash,
+        revokedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+      data: {
+        refreshTokenHash: `rotating:${randomUUID()}`,
+        lastUsedAt: new Date(),
+        userAgent: ctx.userAgent,
+        ip: ctx.ip,
+      },
     });
+    if (claimed.count !== 1) throw new UnauthorizedException('Refresh token no longer valid');
     return this.mint(user, session.id);
   }
 

@@ -49,7 +49,7 @@
  */
 
 import { rawRequest, type Paginated } from "@gopasal/api-client";
-import { authedRequest } from "./client";
+import { authedBlob, authedRequest } from "./client";
 import type { Category } from "./types";
 
 /* ------------------------------------------------------------------ Wire rows */
@@ -586,4 +586,90 @@ export function deleteVariant(
     `/seller/shops/${encodeURIComponent(shopId)}/variants/${encodeURIComponent(variantId)}`,
     { method: "DELETE", signal },
   );
+}
+
+/* --------------------------------------------------------------- Bulk (CSV) */
+
+/**
+ * What the importer reports back.
+ *
+ * Mirrors `ImportReport` in `apps/api/src/modules/catalog/catalog-import.service.ts`.
+ * Two fields carry the contract the screen is built around: `dryRun` says the
+ * server only looked, and `applied` says it actually wrote. Both are false on a
+ * file that failed validation, which is the case the UI must not render as
+ * success.
+ */
+export type ImportIssueWire = { line: number; message: string };
+export type ImportPreviewRowWire = {
+  line: number;
+  action: "create" | "update";
+  name: string;
+  detail: string;
+};
+export type ImportReportWire = {
+  dryRun: boolean;
+  rows: number;
+  productsCreated: number;
+  productsUpdated: number;
+  variantsCreated: number;
+  variantsUpdated: number;
+  errors: ImportIssueWire[];
+  preview: ImportPreviewRowWire[];
+  applied: boolean;
+};
+
+/**
+ * `catalog.import`. Send the file; the server decides nothing until you say so.
+ *
+ * `?mode=` is a word rather than `apply=true|false` because the API validates
+ * query strings with implicit conversion on, where a boolean-typed `"false"`
+ * becomes `true`. The default on both sides is `check`, so a dropped parameter
+ * reports rather than writes. One bad row fails the whole file either way —
+ * there is no partial import, deliberately: a catalogue half-rewritten from a
+ * spreadsheet is a state nobody can reason their way back out of.
+ */
+export function importProducts(
+  shopId: string,
+  file: File,
+  apply: boolean,
+  signal?: AbortSignal,
+): Promise<ImportReportWire> {
+  const form = new FormData();
+  form.append("file", file, file.name);
+  return authedRequest<ImportReportWire>(
+    `/seller/shops/${encodeURIComponent(shopId)}/products/import?mode=${apply ? "apply" : "check"}`,
+    { method: "POST", form, signal },
+  );
+}
+
+/**
+ * `catalog.view`. The whole shelf as CSV, in the shape the importer reads.
+ *
+ * Fetched as a blob rather than linked: the route is authenticated and there are
+ * no signed URLs, so a bare `<a href>` would arrive without the bearer token and
+ * 401 — the same reason the onboarding document download works this way.
+ */
+export async function exportProductsCsv(
+  shopId: string,
+  signal?: AbortSignal,
+): Promise<{ url: string; revoke: () => void }> {
+  const blob = await authedBlob(
+    `/seller/shops/${encodeURIComponent(shopId)}/products/export`,
+    { signal },
+  );
+  const url = URL.createObjectURL(blob);
+  return { url, revoke: () => URL.revokeObjectURL(url) };
+}
+
+/** `catalog.import`. The headers plus one worked row, for a seller with no export yet. */
+export async function importTemplateCsv(
+  shopId: string,
+  signal?: AbortSignal,
+): Promise<{ url: string; revoke: () => void }> {
+  const blob = await authedBlob(
+    `/seller/shops/${encodeURIComponent(shopId)}/products/import-template`,
+    { signal },
+  );
+  const url = URL.createObjectURL(blob);
+  return { url, revoke: () => URL.revokeObjectURL(url) };
 }

@@ -1,8 +1,8 @@
 /**
  * The form's own copy of an application, and how it turns back into a PATCH body.
  *
- * Everything the seller types is held as a string — including the numbers — so a
- * half-typed coordinate does not become `NaN` mid-keystroke. The conversion back
+ * Everything the seller types is held as a string — including the delivery
+ * radius. Coordinates are not typed at all; the phone capture owns them. Conversion
  * to the wire happens once, in {@link diffFields}, and it sends **only what
  * changed**: the API runs `whitelist` + `forbidNonWhitelisted`, so an unknown or
  * pointless key is not merely wasteful, it fails the entire request.
@@ -19,8 +19,6 @@ export type FormValues = {
   contactEmail: string;
   area: string;
   fullAddress: string;
-  lat: string;
-  lng: string;
   deliveryRadiusKm: string;
   hours: string;
   soloMode: boolean;
@@ -88,10 +86,6 @@ function text(value: string | null): string {
   return value ?? "";
 }
 
-function numberText(value: number | null): string {
-  return value === null ? "" : String(value);
-}
-
 export function fromApplication(app: Application): FormValues {
   return {
     shopName: text(app.shopName),
@@ -102,8 +96,6 @@ export function fromApplication(app: Application): FormValues {
     contactEmail: text(app.contactEmail),
     area: text(app.area),
     fullAddress: text(app.fullAddress),
-    lat: numberText(app.lat),
-    lng: numberText(app.lng),
     deliveryRadiusKm: String(app.deliveryRadiusKm),
     hours: text(app.hours),
     soloMode: app.soloMode,
@@ -166,8 +158,8 @@ const UNCLEARABLE_TEXT: Partial<Record<TextKey, string>> = {
  *
  * - `shopName` and `contactEmail` ({@link UNCLEARABLE_TEXT}) reject `""` outright,
  *   so sending one would be a 400 instead of a clear.
- * - `lat`, `lng` and `deliveryRadiusKm` are numbers with no null spelling in the
- *   DTO, and guessing zero would be a lie.
+ * - `deliveryRadiusKm` is a number with no null spelling in the DTO, and
+ *   guessing zero would be a lie.
  * - `payoutMethod` is `@IsIn(['BANK','ESEWA','KHALTI'])`, so an unset dropdown has
  *   nothing legal to send.
  *
@@ -200,14 +192,6 @@ export function diffFields(initial: FormValues, current: FormValues): Applicatio
     }
   }
 
-  for (const key of ["lat", "lng"] as const) {
-    if (!changed.has(key)) continue;
-    const raw = current[key].trim();
-    if (raw === "") continue;
-    const parsed = Number(raw);
-    if (Number.isFinite(parsed)) out[key] = parsed;
-  }
-
   return out;
 }
 
@@ -224,7 +208,7 @@ export function hasChanges(initial: FormValues, current: FormValues): boolean {
  * changed key missing from the patch is a key that is not going anywhere.
  *
  * A screen needs this because "changed" and "sendable" are not the same set. Clear
- * the latitude box and the form is dirty forever otherwise — Save has nothing to
+ * an email the API refuses to blank and the form is dirty forever otherwise — Save has nothing to
  * send, so the footer would keep saying "You have unsaved changes." and the submit
  * panel would keep refusing to send the application. Naming the fields is the
  * honest way out: the seller can retype the value or leave the old one.

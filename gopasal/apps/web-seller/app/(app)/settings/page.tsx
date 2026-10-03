@@ -19,9 +19,9 @@
  *    changed — rather than a full snapshot that would rewrite every column.
  *  - **`null` is not a value.** Every DTO field is `@ValidateIf(v !== undefined)`, so
  *    `null` is answered with a 400 rather than treated as "clear this". A nullable
- *    text column is cleared with `""`; `categoryId`, `lat` and `lng` can be changed
- *    but not emptied, and those fields say so instead of offering a Remove that would
- *    fail.
+ *    text column is cleared with `""`; `categoryId` can be changed but not emptied.
+ *    The shop pin is outside this PATCH and changes only through an on-premises
+ *    phone capture.
  *  - **The response is a bare `Shop` row** — no `myRole`, no `_count`. It cannot be
  *    merged into the console's shop list, so a successful save awaits
  *    `useShops().reload()` and the form is re-seeded from the refetched row. What is
@@ -51,6 +51,8 @@ import {
   Bike,
   Info,
   CheckCircle2,
+  Eye,
+  EyeOff,
   Save,
 } from "lucide-react";
 import { ApiError } from "@gopasal/api-client";
@@ -65,6 +67,7 @@ import { fetchCategories } from "@/lib/api/products";
 import { updateShop, type ShopUpdateBody } from "@/lib/api/shops";
 import type { Category } from "@/lib/api/types";
 import type { SellerShop } from "@/lib/shop-view";
+import { ShopLocationCapture } from "@/components/location/ShopLocationCapture";
 
 /*
   The server's own bounds, mirrored as field limits so a seller is stopped at the
@@ -252,6 +255,36 @@ function SettingsInner() {
         />
       )}
 
+      <Card className="mb-4 p-5">
+        <div className="flex items-start gap-3">
+          <span className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${shop.storefrontVisible ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
+            {shop.storefrontVisible ? <Eye className="h-5 w-5" /> : <EyeOff className="h-5 w-5" />}
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="font-semibold text-ink-900">Customer visibility</h2>
+              <Badge tone={shop.storefrontVisible ? "green" : "marigold"}>
+                {shop.storefrontVisible ? "Visible to customers" : "Private until ready"}
+              </Badge>
+            </div>
+            {shop.storefrontVisible ? (
+              <p className="mt-1 text-sm text-ink-500">
+                This shop has a verified pin and {shop.deliverableProductCount} orderable {shop.deliverableProductCount === 1 ? "product" : "products"}.
+              </p>
+            ) : (
+              <div className="mt-2 text-sm text-ink-600">
+                <p>Approval creates your seller dashboard, but customers only see the shop after every item below is complete:</p>
+                <ul className="mt-2 space-y-1.5">
+                  <ReadinessItem done={!shop.storefrontBlockers.includes("APPROVAL")} label="Shop approved and verified by GoPasal" />
+                  <ReadinessItem done={!shop.storefrontBlockers.includes("VERIFIED_LOCATION")} label="Verified shop pin captured from a phone inside the shop" />
+                  <ReadinessItem done={!shop.storefrontBlockers.includes("DELIVERABLE_PRODUCT")} label="At least one active product is in stock or does not track stock" />
+                </ul>
+              </div>
+            )}
+          </div>
+        </div>
+      </Card>
+
       {/*
         `key` carries the revision, so a successful save remounts the form and its
         draft is seeded again from the shop the refetch returned. A failure leaves
@@ -272,8 +305,22 @@ function SettingsInner() {
         onSave={(body) => {
           void save(shop.id, body);
         }}
+        onLocationCaptured={async () => {
+          await reload();
+          setSaved(shop.name);
+          setRevision((r) => r + 1);
+        }}
       />
     </div>
+  );
+}
+
+function ReadinessItem({ done, label }: { done: boolean; label: string }) {
+  return (
+    <li className="flex items-start gap-2">
+      <CheckCircle2 className={`mt-0.5 h-4 w-4 shrink-0 ${done ? "text-emerald-600" : "text-ink-300"}`} />
+      <span className={done ? "text-ink-500 line-through" : "font-medium text-ink-700"}>{label}</span>
+    </li>
   );
 }
 
@@ -296,8 +343,6 @@ type Draft = {
   phone: string;
   area: string;
   fullAddress: string;
-  lat: string;
-  lng: string;
   deliveryRadiusKm: string;
   hours: string;
   emoji: string;
@@ -315,8 +360,6 @@ function draftOf(shop: SellerShop): Draft {
     phone: shop.phone ?? "",
     area: shop.area ?? "",
     fullAddress: shop.fullAddress ?? "",
-    lat: shop.lat === null ? "" : String(shop.lat),
-    lng: shop.lng === null ? "" : String(shop.lng),
     deliveryRadiusKm: String(shop.deliveryRadiusKm),
     hours: shop.hours ?? "",
     emoji: shop.emoji ?? "",
@@ -338,25 +381,6 @@ const TEXT_FIELDS = [
 ] as const;
 
 type Problems = Partial<Record<keyof Draft, string>>;
-
-/**
- * A coordinate the API would accept, `undefined` when nothing changed, or a
- * sentence when the text cannot be sent at all.
- *
- * Clearing is not one of the outcomes. `lat` and `lng` are nullable columns whose
- * DTO fields refuse `null`, so a pin that exists can be corrected but not removed —
- * and the honest thing is to say that where the field is, rather than to offer a
- * Remove that would come back a 400.
- */
-function coordinate(text: string, current: number | null, span: number): number | string | undefined {
-  const t = text.trim();
-  if (!t) return current === null ? undefined : "A pin can be corrected but not removed.";
-  const n = Number(t);
-  if (!Number.isFinite(n) || n < -span || n > span) {
-    return `Must be a number between −${span} and ${span}.`;
-  }
-  return n === current ? undefined : n;
-}
 
 /**
  * What this draft would send, and what it cannot send yet.
@@ -389,14 +413,6 @@ function review(shop: SellerShop, draft: Draft): { body: ShopUpdateBody; problem
   if (draft.categoryId && draft.categoryId !== (shop.categoryId ?? "")) {
     body.categoryId = draft.categoryId;
   }
-
-  const lat = coordinate(draft.lat, shop.lat, 90);
-  if (typeof lat === "string") problems.lat = lat;
-  else if (lat !== undefined) body.lat = lat;
-
-  const lng = coordinate(draft.lng, shop.lng, 180);
-  if (typeof lng === "string") problems.lng = lng;
-  else if (lng !== undefined) body.lng = lng;
 
   // `Number("")` is 0, so the empty case is tested before the value is read.
   const radiusText = draft.deliveryRadiusKm.trim();
@@ -439,6 +455,7 @@ function ShopSettingsForm({
   saved,
   onEdit,
   onSave,
+  onLocationCaptured,
 }: {
   shop: SellerShop;
   /** `null` until the category request answers; `[]` once it has failed or is empty. */
@@ -449,6 +466,7 @@ function ShopSettingsForm({
   saved: string | null;
   onEdit: () => void;
   onSave: (body: ShopUpdateBody) => void;
+  onLocationCaptured: () => Promise<void>;
 }) {
   // Seeded from the live shop exactly once per mount. The parent remounts this
   // component after a successful save, so a re-seed always comes from a refetched
@@ -689,32 +707,17 @@ function ShopSettingsForm({
               offLabel="Off"
             />
 
-            {/*
-              Two number fields and no map. A picker would be a real improvement and
-              the API would take its output — `lat` and `lng` are ordinary writable
-              columns — but GoPasal has no map component in this console yet, and
-              inventing one is a different task from wiring this endpoint.
-            */}
-            <div className="grid gap-4 border-t border-ink-100 pt-4 sm:grid-cols-2">
-              <NumberField
-                label="Latitude"
-                hint={shop.lat === null ? "Optional" : "Correct it, not remove it"}
+            <div className="border-t border-ink-100 pt-4">
+              <ShopLocationCapture
+                target={{ kind: "shop", id: shop.id }}
+                current={{
+                  lat: shop.lat,
+                  lng: shop.lng,
+                  accuracyM: shop.locationAccuracyM,
+                  capturedAt: shop.locationCapturedAt,
+                }}
                 editable={editable}
-                value={draft.lat}
-                onChange={(v) => patch({ lat: v })}
-                problem={problems.lat}
-                readValue={shop.lat}
-                signed
-              />
-              <NumberField
-                label="Longitude"
-                hint={shop.lng === null ? "Optional" : "Correct it, not remove it"}
-                editable={editable}
-                value={draft.lng}
-                onChange={(v) => patch({ lng: v })}
-                problem={problems.lng}
-                readValue={shop.lng}
-                signed
+                onCaptured={onLocationCaptured}
               />
             </div>
           </div>
@@ -762,8 +765,8 @@ function ShopSettingsForm({
             so there is no picker here rather than one that could not save.
           </p>
           <p className="mt-2 text-xs text-ink-400">
-            Payout accounts, statements and settlement are not part of GoPasal yet. When they arrive
-            they’ll be set up with you directly, not on this screen.
+            Your verified payout destination comes from the approved registration application. See
+            Finance for escrow, COD commission, refund adjustments and settlement references.
           </p>
         </Card>
       </div>
@@ -1032,4 +1035,3 @@ function BoolField({
 function StateChip({ on, onLabel, offLabel }: { on: boolean; onLabel: string; offLabel: string }) {
   return <Badge tone={on ? "green" : "ink"}>{on ? onLabel : offLabel}</Badge>;
 }
-

@@ -122,6 +122,9 @@ describe('summarise', () => {
     const s = summarise([]);
     assert.deepEqual(s, {
       sales: 0,
+      grossSales: 0,
+      refunds: 0,
+      netSales: 0,
       ordersPlaced: 0,
       ordersDelivered: 0,
       ordersCancelled: 0,
@@ -140,6 +143,8 @@ describe('summarise', () => {
       order('2026-08-24T11:00:00Z', 9999, 'REJECTED'),
     ]);
     assert.equal(s.sales, 1500); // the 9999s never happened, financially
+    assert.equal(s.grossSales, 1500);
+    assert.equal(s.netSales, 1500);
     assert.equal(s.ordersPlaced, 6);
     assert.equal(s.ordersDelivered, 2);
     assert.equal(s.ordersCancelled, 2); // CANCELLED + REJECTED
@@ -220,9 +225,9 @@ describe('buildSeries', () => {
   it('keeps a bar for every day, including the days nothing sold', () => {
     const series = buildSeries([order('2026-08-25T06:00:00Z', 1200, 'DELIVERED')], dayKeys);
     assert.deepEqual(series, [
-      { date: '2026-08-24', sales: 0, orders: 0 },
-      { date: '2026-08-25', sales: 1200, orders: 1 },
-      { date: '2026-08-26', sales: 0, orders: 0 },
+      { date: '2026-08-24', sales: 0, gross: 0, refunds: 0, net: 0, orders: 0 },
+      { date: '2026-08-25', sales: 1200, gross: 1200, refunds: 0, net: 1200, orders: 1 },
+      { date: '2026-08-26', sales: 0, gross: 0, refunds: 0, net: 0, orders: 0 },
     ]);
   });
 
@@ -234,14 +239,25 @@ describe('buildSeries', () => {
       ],
       dayKeys,
     );
-    assert.deepEqual(series[0], { date: '2026-08-24', sales: 500, orders: 2 });
+    assert.deepEqual(series[0], { date: '2026-08-24', sales: 500, gross: 500, refunds: 0, net: 500, orders: 2 });
   });
 
   it('files a late-night order under the Nepal day it was placed on', () => {
     // 18:30 UTC on the 25th is 00:15 Kathmandu on the 26th.
     const series = buildSeries([order('2026-08-25T18:30:00Z', 400, 'DELIVERED')], dayKeys);
-    assert.deepEqual(series[1], { date: '2026-08-25', sales: 0, orders: 0 });
-    assert.deepEqual(series[2], { date: '2026-08-26', sales: 400, orders: 1 });
+    assert.deepEqual(series[1], { date: '2026-08-25', sales: 0, gross: 0, refunds: 0, net: 0, orders: 0 });
+    assert.deepEqual(series[2], { date: '2026-08-26', sales: 400, gross: 400, refunds: 0, net: 400, orders: 1 });
+  });
+
+  it('reports delivered gross, completed refunds and net explicitly', () => {
+    const refunded = { ...order('2026-08-25T06:00:00Z', 1_000), refundAmount: 250 };
+    const summary = summarise([refunded]);
+    assert.equal(summary.grossSales, 1_000);
+    assert.equal(summary.refunds, 250);
+    assert.equal(summary.netSales, 750);
+    assert.deepEqual(buildSeries([refunded], ['2026-08-25'])[0], {
+      date: '2026-08-25', sales: 1_000, gross: 1_000, refunds: 250, net: 750, orders: 1,
+    });
   });
 
   it('drops an order outside the window rather than inventing a bucket for it', () => {

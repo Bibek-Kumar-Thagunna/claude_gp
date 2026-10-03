@@ -23,9 +23,7 @@
  * zones and never edit them.
  *
  * What the API does not have, so neither does this file: no ETA, no rider shift or
- * availability window, no proof-of-delivery photo upload — `DeliveryStatusDto` accepts
- * `status`, `podNote`, `codCollected` and `failReason` and 400s anything else, and the
- * uploads module has onboarding and product routes only — and no seller-side write for
+ * availability window, and no seller-side write for
  * a rider's ONLINE/OFFLINE status: `RiderStatus` is set by the rider's own
  * `PATCH /rider/status` and by the assign/complete transactions, so on a seller
  * screen it is display-only.

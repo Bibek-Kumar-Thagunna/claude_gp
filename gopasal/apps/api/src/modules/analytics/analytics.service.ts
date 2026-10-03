@@ -236,7 +236,14 @@ export class AnalyticsService {
     const [orders, previousGroups, items, openGroups, inventory] = await Promise.all([
       this.prisma.order.findMany({
         where: { shopId: inShops, placedAt: placedInWindow },
-        select: { shopId: true, placedAt: true, total: true, status: true, paymentMethod: true },
+        select: {
+          shopId: true,
+          placedAt: true,
+          total: true,
+          status: true,
+          paymentMethod: true,
+          refunds: { where: { status: 'COMPLETED' }, select: { amount: true } },
+        },
       }),
       this.prisma.order.groupBy({
         by: ['status'],
@@ -259,18 +266,22 @@ export class AnalyticsService {
     ]);
 
     const names = await this.productNames(shopIds, items);
-    const summary = summarise(orders);
+    const facts = orders.map(({ refunds, ...order }) => ({
+      ...order,
+      refundAmount: (refunds ?? []).reduce((sum, refund) => sum + refund.amount, 0),
+    }));
+    const summary = summarise(facts);
 
     return {
       ...shell,
       summary,
       comparison: compare(summary, summariseGroups(previousGroups)),
-      salesSeries: buildSeries(orders, w.dayKeys),
+      salesSeries: buildSeries(facts, w.dayKeys),
       topProducts: topProducts(items, names, TOP_PRODUCTS_LIMIT),
-      payments: paymentSplit(orders),
+      payments: paymentSplit(facts),
       openOrders: countOpen(openGroups),
       inventory,
-      ...(includeByShop ? { byShop: summariseByShop(orders, shopIds) } : {}),
+      ...(includeByShop ? { byShop: summariseByShop(facts, shopIds) } : {}),
     };
   }
 

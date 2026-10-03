@@ -185,8 +185,12 @@ export const EDITABLE_FIELDS = [
   'contactEmail',
   'area',
   'fullAddress',
+  // The pin the applicant took with their own phone. `locationCaptureMethod`
+  // is absent on purpose: it is the server's account of how a coordinate was
+  // obtained, not the client's to assert.
   'lat',
   'lng',
+  'locationAccuracyM',
   'deliveryRadiusKm',
   'hours',
   'soloMode',
@@ -212,10 +216,12 @@ export function isEditableField(name: string): name is EditableField {
 }
 
 /**
- * What must be present before an application can be submitted. Business
- * registration (PAN/VAT/registration number) is deliberately absent: most
- * neighbourhood shops in Nepal are unregistered, and demanding paperwork they
- * do not have would exclude exactly the sellers this platform is for.
+ * What must be present before an application can be submitted. A marketplace
+ * shop must identify both the person and the legally registered business behind
+ * it. The verified pin is deliberately not in this list: an applicant may skip
+ * location and complete it from the approved shop's settings. Until then the
+ * storefront eligibility query keeps the shop private. VAT remains conditional
+ * because not every PAN-registered business is required to register for VAT.
  */
 const REQUIRED_AT_SUBMIT = [
   'shopName',
@@ -225,6 +231,8 @@ const REQUIRED_AT_SUBMIT = [
   'fullAddress',
   'ownerName',
   'citizenshipNo',
+  'registrationNo',
+  'panNo',
   'payoutMethod',
 ] as const;
 
@@ -235,8 +243,13 @@ export interface SubmittableApplication {
   contactPhone: string | null;
   area: string | null;
   fullAddress: string | null;
+  lat?: number | null;
+  lng?: number | null;
+  locationCapturedAt?: Date | string | null;
   ownerName: string | null;
   citizenshipNo: string | null;
+  registrationNo: string | null;
+  panNo: string | null;
   payoutMethod: PayoutMethod | null;
   bankName: string | null;
   bankAccountNo: string | null;
@@ -275,19 +288,19 @@ export function missingForSubmit(app: SubmittableApplication): string[] {
 /**
  * Which documents an application cannot be submitted without.
  *
- * Deliberately short, and deliberately not the whole `ShopDocumentKind` list.
- * Citizenship front and back identify the person who will be taking money from
- * customers, and a photograph of the shopfront is what tells a reviewer the
- * place exists — those three are the floor. PAN, VAT and a business licence are
- * uploadable but never required, for the same reason `REQUIRED_AT_SUBMIT` omits
- * the registration numbers: most neighbourhood shops in Nepal have none, and
- * demanding them would exclude exactly the sellers this platform is for.
+ * This is the marketplace KYC floor: owner identity, legal business
+ * registration, tax identity, and evidence that the physical shop exists.
  */
 const ALWAYS_REQUIRED_DOCUMENTS: readonly ShopDocumentKind[] = [
   'CITIZENSHIP_FRONT',
   'CITIZENSHIP_BACK',
+  'BUSINESS_LICENCE',
+  'PAN_CERTIFICATE',
   'SHOP_PHOTO',
 ];
+
+/** Categories in the current catalogue whose trade needs a regulator licence. */
+const REGULATED_CATEGORY_SLUGS = new Set(['pharmacy']);
 
 /**
  * Which documents this particular application needs, given how the applicant
@@ -296,15 +309,25 @@ const ALWAYS_REQUIRED_DOCUMENTS: readonly ShopDocumentKind[] = [
  * irreversible — while a wallet payout is verified against the wallet number
  * itself, so no extra document is demanded of a seller who has no bank.
  */
-export function requiredDocuments(payoutMethod: PayoutMethod | null): ShopDocumentKind[] {
-  return payoutMethod === 'BANK'
-    ? [...ALWAYS_REQUIRED_DOCUMENTS, 'BANK_PROOF']
-    : [...ALWAYS_REQUIRED_DOCUMENTS];
+export function requiredDocuments(
+  payoutMethod: PayoutMethod | null,
+  vatNo?: string | null,
+  categorySlug?: string | null,
+): ShopDocumentKind[] {
+  const required = [...ALWAYS_REQUIRED_DOCUMENTS];
+  if (vatNo?.trim()) required.push('VAT_CERTIFICATE');
+  if (categorySlug && REGULATED_CATEGORY_SLUGS.has(categorySlug)) {
+    required.push('REGULATORY_LICENCE');
+  }
+  if (payoutMethod === 'BANK') required.push('BANK_PROOF');
+  return required;
 }
 
 /** The shape `missingDocuments` needs: the payout choice and what is attached. */
 export interface DocumentBearingApplication {
   payoutMethod: PayoutMethod | null;
+  vatNo?: string | null;
+  category?: { slug: string } | null;
   documents: readonly { kind: ShopDocumentKind; review?: 'PENDING' | 'ACCEPTED' | 'REJECTED' }[];
 }
 
@@ -322,7 +345,23 @@ export function missingDocuments(app: DocumentBearingApplication): ShopDocumentK
   const usable = new Set(
     app.documents.filter((doc) => doc.review !== 'REJECTED').map((doc) => doc.kind),
   );
-  return requiredDocuments(app.payoutMethod).filter((kind) => !usable.has(kind));
+  return requiredDocuments(app.payoutMethod, app.vatNo, app.category?.slug).filter(
+    (kind) => !usable.has(kind),
+  );
+}
+
+/**
+ * Approval is stricter than submission: every required paper must have an
+ * explicit reviewer acceptance. A pending upload is enough to enter the queue,
+ * but never enough to create a shop that can trade.
+ */
+export function unverifiedDocuments(app: DocumentBearingApplication): ShopDocumentKind[] {
+  const accepted = new Set(
+    app.documents.filter((doc) => doc.review === 'ACCEPTED').map((doc) => doc.kind),
+  );
+  return requiredDocuments(app.payoutMethod, app.vatNo, app.category?.slug).filter(
+    (kind) => !accepted.has(kind),
+  );
 }
 
 /**

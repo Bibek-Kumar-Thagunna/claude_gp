@@ -3,7 +3,8 @@
 import * as React from "react";
 import { cn } from "@/lib/cn";
 import { rsCompact, num, dayMonth } from "@/lib/format";
-import type { TrendPoint } from "@/lib/data";
+
+type TrendPoint = { day: string; gmv: number; orders: number };
 
 type Metric = "gmv" | "orders";
 

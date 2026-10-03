@@ -1,8 +1,9 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { RequirePermissions } from '../../rbac/require-permissions.decorator';
+import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import { OrdersService } from './orders.service';
-import { ListShopOrdersQueryDto, RejectOrderDto, TransitionNoteDto } from './dto/orders.dto';
+import { CancelOrderDto, ListShopOrdersQueryDto, RejectOrderDto, TransitionNoteDto } from './dto/orders.dto';
 
 /**
  * Seller order management, shop-scoped. Every route carries `:shopId` so the
@@ -35,32 +36,32 @@ export class OrdersSellerController {
 
   @Post(':orderId/accept')
   @RequirePermissions('orders.accept')
-  accept(@Param('shopId') shopId: string, @Param('orderId') orderId: string, @Body() dto: TransitionNoteDto) {
-    return this.orders.accept(shopId, orderId, dto.note);
+  accept(@CurrentUser('id') actorId: string, @Param('shopId') shopId: string, @Param('orderId') orderId: string, @Body() dto: TransitionNoteDto) {
+    return this.orders.accept(shopId, orderId, dto.note, actorId);
   }
 
   @Post(':orderId/reject')
   @RequirePermissions('orders.reject')
-  reject(@Param('shopId') shopId: string, @Param('orderId') orderId: string, @Body() dto: RejectOrderDto) {
-    return this.orders.reject(shopId, orderId, dto.reason);
+  reject(@CurrentUser('id') actorId: string, @Param('shopId') shopId: string, @Param('orderId') orderId: string, @Body() dto: RejectOrderDto) {
+    return this.orders.reject(shopId, orderId, dto.reason, actorId);
   }
 
   @Post(':orderId/pack')
   @RequirePermissions('orders.pack')
-  pack(@Param('shopId') shopId: string, @Param('orderId') orderId: string, @Body() dto: TransitionNoteDto) {
-    return this.orders.pack(shopId, orderId, dto.note);
+  pack(@CurrentUser('id') actorId: string, @Param('shopId') shopId: string, @Param('orderId') orderId: string, @Body() dto: TransitionNoteDto) {
+    return this.orders.pack(shopId, orderId, dto.note, actorId);
   }
 
   @Post(':orderId/dispatch')
   @RequirePermissions('orders.dispatch')
   @ApiOperation({ summary: 'Send out for delivery (a rider must be assigned first)' })
-  dispatch(@Param('shopId') shopId: string, @Param('orderId') orderId: string, @Body() dto: TransitionNoteDto) {
-    return this.orders.dispatch(shopId, orderId, dto.note);
+  dispatch(@CurrentUser('id') actorId: string, @Param('shopId') shopId: string, @Param('orderId') orderId: string, @Body() dto: TransitionNoteDto) {
+    return this.orders.dispatch(shopId, orderId, dto.note, actorId);
   }
 
   @Post(':orderId/cancel')
   @RequirePermissions('orders.cancel')
-  cancel(@Param('shopId') shopId: string, @Param('orderId') orderId: string, @Body() dto: TransitionNoteDto) {
-    return this.orders.cancelForShop(shopId, orderId, dto.note);
+  cancel(@CurrentUser('id') actorId: string, @Param('shopId') shopId: string, @Param('orderId') orderId: string, @Body() dto: CancelOrderDto) {
+    return this.orders.cancelForShop(shopId, orderId, dto.reason, actorId);
   }
 }

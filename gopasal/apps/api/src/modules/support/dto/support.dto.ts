@@ -1,4 +1,4 @@
-import { IsEnum, IsIn, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsEnum, IsIn, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
 import { DisputeStatus, TicketPriority, TicketStatus } from '@prisma/client';
 
 export class CreateTicketDto {
@@ -26,9 +26,6 @@ export class TicketMessageDto {
   @MinLength(1)
   @MaxLength(4000)
   body!: string;
-
-  @IsOptional()
-  attachments?: string[];
 }
 
 export class SetTicketStatusDto {
@@ -61,4 +58,32 @@ export class ResolveDisputeDto {
   @IsString()
   @MaxLength(2000)
   resolution?: string;
+}
+
+export class AskSupportAssistantDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  sessionId?: string;
+
+  @IsString()
+  @MinLength(2)
+  @MaxLength(1200)
+  message!: string;
+
+  @IsUUID()
+  clientMessageId!: string;
+}
+
+export class EscalateSupportAssistantDto {
+  @IsOptional()
+  @IsString()
+  @MinLength(3)
+  @MaxLength(140)
+  subject?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  reason?: string;
 }

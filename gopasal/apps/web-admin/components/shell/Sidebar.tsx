@@ -19,6 +19,7 @@ import {
   KeyRound,
   UserCog,
   ScrollText,
+  ShieldCheck,
   Settings,
   type LucideIcon,
 } from "lucide-react";
@@ -29,12 +30,7 @@ import { useAuth } from "@/components/auth-provider";
 import { useOpenApplicationCount } from "@/components/use-open-applications";
 import { type PermissionId } from "@/lib/rbac";
 
-type BadgeKey =
-  | "pendingShops"
-  | "moderationQueue"
-  | "openDisputes"
-  | "openFraud"
-  | "openTickets";
+type BadgeKey = "pendingShops";
 
 type NavItem = {
   href: string;
@@ -57,15 +53,15 @@ const NAV: { section?: string; items: NavItem[] }[] = [
       { href: "/shops", label: "Shops", icon: Store, perms: ["shops.view"] },
       { href: "/approvals", label: "Approvals", icon: ClipboardCheck, perms: ["shops.approve", "shops.reject"], badgeKey: "pendingShops" },
       { href: "/users", label: "Users", icon: Users, perms: ["users.view"] },
-      { href: "/catalog", label: "Catalog moderation", icon: PackageSearch, perms: ["catalog.moderate"], badgeKey: "moderationQueue" },
+      { href: "/catalog", label: "Catalog moderation", icon: PackageSearch, perms: ["catalog.moderate"] },
     ],
   },
   {
     section: "Trust & safety",
     items: [
-      { href: "/disputes", label: "Disputes", icon: Scale, perms: ["disputes.view"], badgeKey: "openDisputes" },
-      { href: "/fraud", label: "Fraud", icon: ShieldAlert, perms: ["fraud.view"], badgeKey: "openFraud" },
-      { href: "/support", label: "Support", icon: LifeBuoy, perms: ["support.view"], badgeKey: "openTickets" },
+      { href: "/disputes", label: "Disputes", icon: Scale, perms: ["disputes.view"] },
+      { href: "/fraud", label: "Fraud", icon: ShieldAlert, perms: ["fraud.view"] },
+      { href: "/support", label: "Support", icon: LifeBuoy, perms: ["support.view"] },
       { href: "/policies", label: "Policies", icon: FileText, perms: ["policy.view"] },
     ],
   },
@@ -73,7 +69,7 @@ const NAV: { section?: string; items: NavItem[] }[] = [
     section: "Business",
     items: [
       { href: "/analytics", label: "Analytics", icon: BarChart3, perms: ["analytics.platform.view"] },
-      { href: "/finance", label: "Finance", icon: Wallet, perms: ["finance.view"] },
+      { href: "/finance", label: "Finance", icon: Wallet, perms: ["finance.platform.view"] },
       { href: "/coupons", label: "Coupons", icon: Ticket, perms: ["coupons.manage"] },
     ],
   },
@@ -83,27 +79,24 @@ const NAV: { section?: string; items: NavItem[] }[] = [
       { href: "/roles", label: "Roles & permissions", icon: KeyRound, perms: ["rbac.platform.manage"] },
       { href: "/staff", label: "Platform staff", icon: UserCog, perms: ["rbac.platform.manage"] },
       { href: "/audit", label: "Audit log", icon: ScrollText, perms: ["audit.view"] },
-      { href: "/settings", label: "Settings", icon: Settings, perms: ["admin.dashboard.view"] },
+      { href: "/privacy", label: "Privacy & retention", icon: ShieldCheck, perms: ["privacy.view"] },
+      { href: "/settings", label: "Settings", icon: Settings, perms: ["settings.platform.view"] },
     ],
   },
 ];
 
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
-  const { can, moderation, disputes, fraud, tickets } = useAdmin();
+  const { can } = useAdmin();
   const { superAdmin, roleName } = useAuth();
   const openApplications = useOpenApplicationCount();
 
-  // `pendingShops` is the real onboarding queue; the rest are still fixtures.
+  // Only render counts backed by a live API query.
   const badges: Record<BadgeKey, number> = React.useMemo(
     () => ({
       pendingShops: openApplications ?? 0,
-      moderationQueue: moderation.filter((p) => p.isActive).length,
-      openDisputes: disputes.filter((d) => d.status === "OPEN" || d.status === "UNDER_REVIEW").length,
-      openFraud: fraud.filter((f) => f.status === "OPEN" || f.status === "REVIEWING").length,
-      openTickets: tickets.filter((t) => t.status === "OPEN" || t.status === "PENDING").length,
     }),
-    [openApplications, moderation, disputes, fraud, tickets],
+    [openApplications],
   );
 
   return (

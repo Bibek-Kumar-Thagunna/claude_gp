@@ -29,6 +29,7 @@ export const {
   watchStorage,
   refreshSession,
   authedRequest,
+  authedBlob,
   requestOtp,
   verifyOtp,
   fetchMe,

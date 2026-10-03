@@ -52,7 +52,8 @@ export function DocumentsPanel({
   const [error, setError] = React.useState<{ slot: string; message: string } | null>(null);
   const canEdit = app.canEdit;
 
-  const required = requiredDocumentKinds(app.payoutMethod);
+  const required = requiredDocumentKinds(app.payoutMethod, app.vatNo, app.category?.slug);
+  const optional = OPTIONAL_DOCUMENT_KINDS.filter((kind) => !required.includes(kind));
   const missing = new Set<string>(app.missingDocuments);
   const byKind = new Map<DocumentKind, ApplicationDocument[]>();
   for (const doc of app.documents) {
@@ -146,7 +147,7 @@ export function DocumentsPanel({
         <p className="text-xs font-semibold uppercase tracking-wide text-ink-400">
           Helpful, but not required
         </p>
-        {OPTIONAL_DOCUMENT_KINDS.map((kind) => (
+        {optional.map((kind) => (
           <Slot
             key={kind}
             slot={documentSlot(kind)}

@@ -50,7 +50,10 @@ export function DocumentList({
   applicationId,
   documents,
   missingDocuments,
+  approvalMissingDocuments,
   payoutMethod,
+  vatNo,
+  categorySlug,
   decidable,
   onReviewed,
 }: {
@@ -58,7 +61,11 @@ export function DocumentList({
   documents: ApplicationDocument[];
   /** Server-computed: required kinds that are absent *or* rejected. */
   missingDocuments: DocumentKind[];
+  /** Server-computed approval gate: absent, rejected, or still pending review. */
+  approvalMissingDocuments: DocumentKind[];
   payoutMethod: PayoutMethod | null;
+  vatNo: string | null;
+  categorySlug: string | null;
   /** Whether the application is in a status where decisions are accepted. */
   decidable: boolean;
   /** Called after a decision lands, so the parent can re-read the application. */
@@ -78,7 +85,7 @@ export function DocumentList({
     [],
   );
 
-  const required = requiredDocumentKinds(payoutMethod);
+  const required = requiredDocumentKinds(payoutMethod, vatNo, categorySlug);
 
   async function open(doc: ApplicationDocument) {
     setError(null);
@@ -110,6 +117,7 @@ export function DocumentList({
   }
 
   const absent = missingDocuments.filter((k) => !documents.some((d) => d.kind === k));
+  const pendingReview = approvalMissingDocuments.filter((kind) => !missingDocuments.includes(kind));
 
   return (
     <div>
@@ -139,6 +147,20 @@ export function DocumentList({
           <p className="mt-1.5 text-xs">
             Approval is refused by the API until these are attached and accepted. Use “Request
             changes” to ask for them.
+          </p>
+        </InlineWarning>
+      )}
+
+      {pendingReview.length > 0 && (
+        <InlineWarning message="Required papers are attached but still need review." className="mt-3">
+          <ul className="mt-1.5 list-inside list-disc text-xs">
+            {pendingReview.map((kind) => (
+              <li key={kind}>{documentLabel(kind)}</li>
+            ))}
+          </ul>
+          <p className="mt-1.5 text-xs">
+            Open each file and accept it before approving the shop. The API blocks approval until
+            every required paper has an explicit acceptance.
           </p>
         </InlineWarning>
       )}

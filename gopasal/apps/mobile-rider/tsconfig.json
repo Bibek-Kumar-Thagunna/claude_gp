@@ -1,0 +1,8 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true
+  },
+  "//": "The tests are excluded and typechecked separately (tests/tsconfig.json). They run in Node and need its types; the app runs in Hermes and must not be able to reach for them by accident.",
+  "exclude": ["tests", "node_modules", "dist-web", ".expo"]
+}

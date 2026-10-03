@@ -1,13 +1,32 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UploadedFile as FilePart,
+  UseInterceptors,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
+import { MULTIPART_HARD_LIMIT_BYTES } from '../../config/configuration';
+import type { UploadedFile } from '../uploads/uploaded-file';
 import { DeliveryService } from './delivery.service';
 import { RiderLocationService } from './rider-location.service';
-import { DeliveryStatusDto, RiderPingDto, RiderStatusDto } from './dto/delivery.dto';
+import {
+  DeliveryOrderParamDto,
+  DeliveryStatusDto,
+  RiderDeliveryHistoryQueryDto,
+  RiderPingDto,
+  RiderStatusDto,
+} from './dto/delivery.dto';
 
 /**
- * Rider self-service surface (used by the rider app — deferred, but the API is
- * live). Identity comes from the JWT; the service checks the user is actually a
+ * Rider self-service surface used by the dedicated rider web console and future
+ * native app. Identity comes from the JWT; the service checks the user is actually a
  * registered rider and only lets them touch their own deliveries.
  *
  * `POST /rider/ping` is the HTTP fallback for GPS when the WebSocket can't
@@ -40,10 +59,43 @@ export class RiderController {
     return this.delivery.myDeliveries(userId);
   }
 
+  @Get('deliveries/history')
+  @ApiOperation({ summary: 'My completed and failed delivery history' })
+  history(@CurrentUser('id') userId: string, @Query() query: RiderDeliveryHistoryQueryDto) {
+    return this.delivery.myDeliveryHistory(userId, query);
+  }
+
   @Patch('orders/:orderId/delivery')
   @ApiOperation({ summary: 'Update the status of my delivery' })
-  updateStatus(@CurrentUser('id') userId: string, @Param('orderId') orderId: string, @Body() dto: DeliveryStatusDto) {
-    return this.delivery.riderUpdateStatus(userId, orderId, dto);
+  updateStatus(
+    @CurrentUser('id') userId: string,
+    @Param() params: DeliveryOrderParamDto,
+    @Body() dto: DeliveryStatusDto,
+  ) {
+    return this.delivery.riderUpdateStatus(userId, params.orderId, dto);
+  }
+
+  @Post('orders/:orderId/proof')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MULTIPART_HARD_LIMIT_BYTES, files: 1 } }))
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['file'],
+      properties: { file: { type: 'string', format: 'binary' } },
+    },
+  })
+  @ApiOperation({
+    summary: 'Securely attach a private proof-of-delivery photo',
+    description:
+      'JPEG, PNG or WebP only. The object is stored privately and the storage key is never returned to the browser.',
+  })
+  uploadProof(
+    @CurrentUser('id') userId: string,
+    @Param() params: DeliveryOrderParamDto,
+    @FilePart() file: UploadedFile | undefined,
+  ) {
+    return this.delivery.uploadMyProof(userId, params.orderId, file);
   }
 
   @Post('ping')

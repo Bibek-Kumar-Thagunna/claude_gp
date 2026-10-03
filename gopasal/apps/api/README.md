@@ -4,7 +4,7 @@ The backend for **GoPasal** — a hyperlocal commerce platform for Nepal. One Ne
 service powers all three surfaces (customer `gopasal.com`, seller `seller.gopasal.com`,
 admin `admin.gopasal.com`) with a custom, default‑deny RBAC engine, self‑delivery with
 **live rider GPS tracking**, and swappable third‑party providers (maps, SMS/OTP,
-payments, push, storage) selected entirely through environment variables.
+payments, push, storage, customer support assistant) selected entirely through environment variables.
 
 > Engineered by **Velayon Dynamics Pvt. Ltd.** · Founder **Bibek Kumar Thagunna** · Co‑founder **Suyogya Sedhai**
 
@@ -12,25 +12,25 @@ payments, push, storage) selected entirely through environment variables.
 
 ## Tech stack
 
-| Concern            | Choice                                                                 |
-| ------------------ | ---------------------------------------------------------------------- |
-| Framework          | NestJS 10 (modular, DI, guards, interceptors, WebSocket gateway)       |
-| Language           | TypeScript                                                             |
-| Database           | PostgreSQL 16 + **PostGIS** (radius / “within delivery zone” geo queries) |
-| ORM                | Prisma 5                                                               |
-| Cache / pub‑sub    | Redis 7 (sessions, OTP, socket fan‑out, BullMQ jobs)                   |
-| Realtime           | Socket.IO + `@socket.io/redis-adapter` (horizontal scale)              |
-| Background jobs    | BullMQ 5 (notification fan‑out, best‑effort so requests never block)   |
-| Domain events      | `@nestjs/event-emitter` — orders/delivery emit; notifications, loyalty and realtime listen |
-| Auth               | Phone **OTP** → short‑lived access JWT + rotating refresh session      |
-| Authorization      | Custom RBAC (two scopes, editable roles, default‑deny)                 |
-| Docs               | Swagger/OpenAPI at `/api/docs`                                         |
+| Concern         | Choice                                                                                     |
+| --------------- | ------------------------------------------------------------------------------------------ |
+| Framework       | NestJS 10 (modular, DI, guards, interceptors, WebSocket gateway)                           |
+| Language        | TypeScript                                                                                 |
+| Database        | PostgreSQL 16 + **PostGIS** (radius / “within delivery zone” geo queries)                  |
+| ORM             | Prisma 5                                                                                   |
+| Cache / pub‑sub | Redis 7 (sessions, OTP, socket fan‑out, BullMQ jobs)                                       |
+| Realtime        | Socket.IO + `@socket.io/redis-adapter` (horizontal scale)                                  |
+| Background jobs | BullMQ 5 (notification fan‑out, best‑effort so requests never block)                       |
+| Domain events   | `@nestjs/event-emitter` — orders/delivery emit; notifications, loyalty and realtime listen |
+| Auth            | Phone **OTP** → short‑lived access JWT + rotating refresh session                          |
+| Authorization   | Custom RBAC (two scopes, editable roles, default‑deny)                                     |
+| Docs            | Swagger/OpenAPI at `/api/docs`                                                             |
 
 ---
 
 ## Prerequisites
 
-- **Node.js ≥ 20** and **pnpm ≥ 9** (`npm i -g pnpm`)
+- **Node.js ≥ 22** and **pnpm ≥ 9** (`npm i -g pnpm`)
 - **Docker** + Docker Compose (for Postgres/PostGIS + Redis) — or your own Postgres 16 with the `postgis` extension and a Redis 7 instance.
 
 ---
@@ -81,16 +81,16 @@ Handy extras: `pnpm db:studio` (Prisma Studio), `pnpm db:reset` (drop → migrat
 
 Log in by phone; read the OTP from the API log.
 
-| Role                      | Phone         | Notes                                        |
-| ------------------------- | ------------- | -------------------------------------------- |
-| Super Admin (platform)    | `9800000001`  | god‑mode across `admin.gopasal.com`          |
-| Operations Admin          | `9800000002`  | shop approvals, orders, support              |
-| Support Agent             | `9800000003`  | tickets + disputes                           |
-| Shop Owner — Namaste Kirana | `9811111111` | full control of its shop                     |
-| Shop Manager              | `9811111112`  | day‑to‑day ops, no RBAC/settings             |
-| Rider                     | `9811111120`  | assigned to the live order below             |
-| Customer — Rina           | `9840000001`  | has **live order `GP-100001`** out for delivery |
-| Customer — Kiran          | `9840000002`  | has a delivered order + review + loyalty     |
+| Role                        | Phone        | Notes                                           |
+| --------------------------- | ------------ | ----------------------------------------------- |
+| Super Admin (platform)      | `9800000001` | god‑mode across `admin.gopasal.com`             |
+| Operations Admin            | `9800000002` | shop approvals, orders, support                 |
+| Support Agent               | `9800000003` | tickets + disputes                              |
+| Shop Owner — Namaste Kirana | `9811111111` | full control of its shop                        |
+| Shop Manager                | `9811111112` | day‑to‑day ops, no RBAC/settings                |
+| Rider                       | `9811111120` | assigned to the live order below                |
+| Customer — Rina             | `9840000001` | has **live order `GP-100001`** out for delivery |
+| Customer — Kiran            | `9840000002` | has a delivered order + review + loyalty        |
 
 There are three shops: **Namaste Kirana** (grocery, active), **Everest Pharmacy**
 (pharmacy, active) and **Fresh Valley Veggies** (vegetables, **PENDING** — sitting in the
@@ -150,14 +150,14 @@ Customers see the **rider’s live position on a map** while an order is out for
 not just status text. It runs over Socket.IO on the **`/realtime`** namespace (JWT is
 passed on connect):
 
-| Direction        | Event              | Payload                                             |
-| ---------------- | ------------------ | --------------------------------------------------- |
-| client → server  | `order:subscribe`  | `{ orderId }` — join that order’s room; replies with the last known `rider:location` |
-| client → server  | `order:unsubscribe`| `{ orderId }`                                       |
-| rider → server   | `rider:ping`       | `{ lat, lng, heading, speed, accuracy }` (server‑throttled) |
-| server → clients  | `rider:location`  | `{ orderId, lat, lng, heading, speed, accuracy, ts }` |
-| server → clients  | `order:status`    | `{ orderId, status }`                               |
-| server → clients  | `delivery:status` | `{ orderId, status }`                               |
+| Direction        | Event               | Payload                                                                              |
+| ---------------- | ------------------- | ------------------------------------------------------------------------------------ |
+| client → server  | `order:subscribe`   | `{ orderId }` — join that order’s room; replies with the last known `rider:location` |
+| client → server  | `order:unsubscribe` | `{ orderId }`                                                                        |
+| rider → server   | `rider:ping`        | `{ lat, lng, heading, speed, accuracy }` (server‑throttled)                          |
+| server → clients | `rider:location`    | `{ orderId, lat, lng, heading, speed, accuracy, ts }`                                |
+| server → clients | `order:status`      | `{ orderId, status }`                                                                |
+| server → clients | `delivery:status`   | `{ orderId, status }`                                                                |
 
 Pings are throttled and locations expire (see the `RIDER_*` env vars); the Redis adapter
 fans emits out across every API instance. Seeded order `GP-100001` is already
@@ -172,13 +172,14 @@ app never hard‑codes a vendor and you can swap one in without touching feature
 Development runs on real local implementations — not mocks, and not bypasses. Add
 production keys in `apps/api/.env`:
 
-| Provider     | Env selector       | Development default                        | Production key(s)                              |
-| ------------ | ------------------ | ------------------------------------------ | ---------------------------------------------- |
-| SMS / OTP    | `SMS_PROVIDER`     | `log` — real OTP, printed to the API log    | `SPARROW_SMS_TOKEN` + `SPARROW_SMS_FROM`, or `TWILIO_*` |
-| File storage | `STORAGE_PROVIDER` | `local` — real bytes under `./uploads`      | `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY` (+ `S3_ENDPOINT`, `S3_REGION`) |
-| Maps / geo   | `MAP_PROVIDER`     | `osm` — real great‑circle distance, key‑free | `MAPBOX_ACCESS_TOKEN`                        |
-| Push         | `PUSH_PROVIDER`    | `log` — in‑app notifications are unaffected  | not implemented yet (needs a device‑token registry) |
-| Payments     | COD is always on   | eSewa/Khalti point at the vendor sandboxes  | `ESEWA_MERCHANT_CODE` + `ESEWA_SECRET`, `KHALTI_SECRET_KEY` |
+| Provider          | Env selector                 | Development default                                             | Production key(s)                                                            |
+| ----------------- | ---------------------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| SMS / OTP         | `SMS_PROVIDER`               | `log` — real OTP, printed to the API log                        | `SPARROW_SMS_TOKEN` + `SPARROW_SMS_FROM`, or `TWILIO_*`                      |
+| File storage      | `STORAGE_PROVIDER`           | `local` — real bytes under `./uploads`                          | `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY` (+ `S3_ENDPOINT`, `S3_REGION`) |
+| Maps / geo        | `MAP_PROVIDER`               | `osm` — real great‑circle distance, key‑free                    | recommended: `BAATO_ACCESS_TOKEN` + restricted `BAATO_BROWSER_ACCESS_TOKEN` |
+| Push              | `PUSH_PROVIDER`              | `log` — in‑app notifications are unaffected                     | `expo` uses the registered device-token registry (`EXPO_ACCESS_TOKEN` is optional) |
+| Payments          | COD                          | eSewa ePay v2 and Khalti KPG-2 use vendor sandboxes             | `ESEWA_MERCHANT_CODE` + `ESEWA_SECRET`, `KHALTI_SECRET_KEY`                  |
+| Support assistant | `SUPPORT_ASSISTANT_PROVIDER` | `knowledge` — production-safe approved answers, no external key | `OPENAI_API_KEY` when selector is `openai`                                   |
 
 Two rules hold everywhere. **Nothing silently downgrades:** selecting a provider without
 its credential fails at boot naming the exact variable, rather than logging the vendor's
@@ -190,16 +191,33 @@ The OTP itself is identical in both modes — same length, hashing, expiry, atte
 and per‑phone rate limit, verified through the same code path. There is no universal code
 and no "any OTP is accepted" switch in any environment.
 
+The support assistant never silently invents a response when OpenAI is unavailable or the
+approved knowledge is insufficient. It offers a persisted human handoff and attaches the
+conversation to the support ticket. The OpenAI path moderates input, requests a strict
+structured answer, disables response storage, filters citations to approved article IDs,
+and keeps all refund, account and money decisions with authorized staff.
+
 `validateConfig` runs in every environment and additionally refuses, in production only:
 `SMS_PROVIDER=log`, `SMS_DEV_OUTBOX_FILE`, the development JWT secrets, two identical JWT
-secrets, and a missing `PUBLIC_URL` or `DATABASE_URL`.
+secrets, and a missing `PUBLIC_URL`, `CUSTOMER_WEB_URL`, or `DATABASE_URL`.
 
-The browser‑exposed map token is `NEXT_PUBLIC_MAPBOX_TOKEN` (frontends read this); with the
-default `osm` provider the frontends need no token at all.
+The browser gets its MapLibre style from the API. With Baato, address search, place lookup,
+reverse geocoding and bike routes are proxied through the API using the server token; only the
+origin-restricted browser token is present in the style URL. Provider results are cached in Redis
+for 12 hours, below Baato's current 48-hour free-credit caching ceiling. Local `osm` remains an
+honest degraded mode and production refuses its public demo style.
+
+Khalti credentials also activate full wallet refunds. The API verifies the original
+amount and Khalti transaction ID before refunding, safely recognizes a prior successful
+refund, and retries transient failures with backoff. eSewa, partial refunds and Khalti
+banking-rail refunds that need a separately verified payer mobile remain in the audited
+finance queue for merchant-dashboard execution; operators must record the genuine external
+reference and cannot simulate completion.
+Mapbox deployments instead use `MAPBOX_ACCESS_TOKEN`.
 
 ### Optional: S3 locally, via MinIO
 
-`STORAGE_PROVIDER=local` is the default and needs nothing. To exercise the *S3* code path
+`STORAGE_PROVIDER=local` is the default and needs nothing. To exercise the _S3_ code path
 before you have a bucket, the compose file ships MinIO behind a profile so it never starts
 by accident:
 
@@ -220,13 +238,13 @@ A seller applies, attaches scans, submits; a reviewer reads the scans and decide
 halves work locally with no credential — `STORAGE_PROVIDER=local` writes real bytes under
 `apps/api/uploads` and reads them back.
 
-| Method + path (under `/api/v1`)                                            | Who                     |
-| ------------------------------------------------------------------------- | ----------------------- |
-| `POST   seller/onboarding/applications/:id/documents`                     | the applicant           |
-| `GET    seller/onboarding/applications/:id/documents/:docId/file`          | the applicant           |
-| `DELETE seller/onboarding/applications/:id/documents/:docId`               | the applicant           |
-| `GET    admin/onboarding/applications/:id/documents/:docId/file`           | `shops.view`            |
-| `POST   admin/onboarding/applications/:id/documents/:docId/review`         | `shops.approve`         |
+| Method + path (under `/api/v1`)                                    | Who             |
+| ------------------------------------------------------------------ | --------------- |
+| `POST   seller/onboarding/applications/:id/documents`              | the applicant   |
+| `GET    seller/onboarding/applications/:id/documents/:docId/file`  | the applicant   |
+| `DELETE seller/onboarding/applications/:id/documents/:docId`       | the applicant   |
+| `GET    admin/onboarding/applications/:id/documents/:docId/file`   | `shops.view`    |
+| `POST   admin/onboarding/applications/:id/documents/:docId/review` | `shops.approve` |
 
 Upload is `multipart/form-data` with a `file` part and a `kind` field. JPEG, PNG, WebP or
 PDF only, and the type is decided by **reading the bytes**: the declared `Content-Type`, the
@@ -250,15 +268,18 @@ Bytes go through `StorageProvider`; PostgreSQL holds only metadata (`kind`, `sto
 `fileName`, `mimeType`, `sizeBytes`, review state and note). Uploading a kind that is
 already attached replaces it — one row, one object, the old bytes deleted — except `OTHER`,
 which accumulates up to `MAX_DOCUMENTS_PER_APPLICATION`. If the database insert fails the
-just‑written object is removed, and if a *replacement* fails the original row and its bytes
+just‑written object is removed, and if a _replacement_ fails the original row and its bytes
 are kept, so there is never an unreferenced scan and never a lost one. Every upload,
 replacement, removal, reviewer view and accept/reject writes an audit entry and an
-application timeline event; the reviewer's view is recorded *before* the bytes are read.
+application timeline event; the reviewer's view is recorded _before_ the bytes are read.
 
-Submission requires the KYC set — both sides of the citizenship card and a shopfront photo,
-plus proof of account for a `BANK` payout. A **rejected** scan does not count as present, so
-"changes requested" cannot be cleared by resubmitting the same file. Business registration
-(PAN, VAT, licence) stays optional: most Nepali shops are unregistered.
+Submission requires the KYC set — both sides of the owner's citizenship card, a current
+business-registration certificate, a business PAN certificate and a shopfront photo, plus
+proof of account for a `BANK` payout. A VAT certificate is required when the applicant
+declares a VAT number, and the applicable regulator licence is required for regulated
+categories (currently pharmacy). A **rejected** scan does not count as present, so "changes
+requested" cannot be cleared by resubmitting the same file. Approval is stricter still:
+every required document must have been explicitly accepted by a reviewer.
 
 ---
 
@@ -273,7 +294,7 @@ AWS's published PutObject vector, with the signature re‑derived in‑test), ev
 family, the onboarding state machine cell by cell, the whole upload path, the error envelope
 and the bounded Redis close. They are
 hermetic: `fetch` is stubbed and restored, config is passed in rather than read from
-`process.env`. Storage is deliberately *not* mocked in the upload and document tests — a
+`process.env`. Storage is deliberately _not_ mocked in the upload and document tests — a
 real `LocalStorageProvider` writes into a real temp directory, because "the bytes are on
 disk", "the old object is gone" and "nothing escaped the upload root" are claims about a
 filesystem that a stubbed provider would let pass while nothing had happened.
@@ -287,7 +308,7 @@ attached**. A service that throws
 client: they are what lets the seller wizard highlight the two empty fields and name the
 missing citizenship scan instead of showing one flat sentence. The filter used to rebuild the
 body from `message` alone and silently drop the rest, which passed every unit test — they
-asserted on `exception.getResponse()`, the shape *before* the filter — and failed the first
+asserted on `exception.getResponse()`, the shape _before_ the filter — and failed the first
 time a real HTTP client looked. Two rules follow: extra fields travel only below 500 (a
 5xx's internals are not the caller's business) and only after `sanitize()`, since
 interceptors do not run on the error path. **When a field is meant to be parsed rather than
@@ -298,11 +319,11 @@ displayed, assert on the serialised body** (`all-exceptions.filter.spec.ts`,
 
 `SIGINT`/`SIGTERM` are handled in `main.ts`: drop idle connections, `app.close()`, then exit
 explicitly, with an 8-second watchdog that logs and exits anyway if a hook wedges. Nest's
-`enableShutdownHooks()` alone only *starts* the close and leaves the process to end by
+`enableShutdownHooks()` alone only _starts_ the close and leaves the process to end by
 itself; `app.close()` from a `beforeExit` listener is worse than useless, because `beforeExit`
 is re-emitted whenever the loop drains and the handler always schedules more async work. Each
 Redis `quit()` is bounded at two seconds and falls back to `disconnect()`, and BullMQ is given
-connection *options* it owns rather than a shared `duplicate()` it will never close. The E2E
+connection _options_ it owns rather than a shared `duplicate()` it will never close. The E2E
 harness fails the run if the API has to be SIGKILLed.
 
 ### Runtime verification of the upload path
@@ -360,7 +381,7 @@ apps/api/
 ## A note on the authoring sandbox
 
 The authoring environment has a **network‑blocked package registry** and **no Docker**, so
-anything needing a running container has to be verified on your machine. What *has* been
+anything needing a running container has to be verified on your machine. What _has_ been
 executed here, against the installed dependency tree: `prisma validate`, `prisma generate`,
 `tsc --noEmit` (0 errors), `eslint --max-warnings 0` (0 problems), `nest build` (emits
 `dist/main.js`) and the 343‑test unit suite (all passing). `pnpm db:migrate` and `pnpm db:seed`

@@ -9,12 +9,14 @@ import {
   Package,
   Boxes,
   BarChart3,
+  Wallet,
   Ticket,
   Star,
   Users,
   ShieldCheck,
   Settings,
   type LucideIcon,
+  MessageCircle,
 } from "lucide-react";
 import { Logo } from "@gopasal/ui";
 import { cn } from "@/lib/cn";
@@ -52,6 +54,7 @@ const NAV: { section?: string; items: NavItem[] }[] = [
     items: [
       { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, perms: ["dashboard.view"] },
       { href: "/orders", label: "Orders", icon: ShoppingBag, perms: ["orders.view"] },
+      { href: "/messages", label: "Messages", icon: MessageCircle, perms: ["messages.view"] },
       { href: "/delivery", label: "Delivery", icon: Truck, perms: ["delivery.view"] },
     ],
   },
@@ -67,6 +70,7 @@ const NAV: { section?: string; items: NavItem[] }[] = [
     section: "Business",
     items: [
       { href: "/analytics", label: "Analytics", icon: BarChart3, perms: ["analytics.view"] },
+      { href: "/finance", label: "Finance", icon: Wallet, perms: ["finance.view"] },
       { href: "/reviews", label: "Reviews", icon: Star, perms: ["reviews.view"] },
       { href: "/staff", label: "Staff", icon: Users, perms: ["team.view"] },
       { href: "/roles", label: "Roles & permissions", icon: ShieldCheck, perms: ["rbac.manage"] },

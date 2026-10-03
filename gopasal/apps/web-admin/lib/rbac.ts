@@ -38,12 +38,18 @@ export type PermissionId =
   | "policy.publish"
   // Analytics & finance
   | "analytics.platform.view"
-  | "finance.view"
+  | "finance.platform.view"
+  | "finance.manage"
+  // Platform configuration
+  | "settings.platform.view"
+  | "settings.platform.manage"
   // Support
   | "support.view"
   | "support.respond"
   // Compliance
   | "audit.view"
+  | "privacy.view"
+  | "privacy.manage"
   | "rbac.platform.manage";
 
 export type PermGroup = {
@@ -142,7 +148,18 @@ export const PERMISSION_GROUPS: PermGroup[] = [
     description: "Platform insight and financial visibility.",
     permissions: [
       { id: "analytics.platform.view", label: "View platform analytics", labelNp: "प्लेटफर्म विश्लेषण", hint: "GMV, orders, growth trends." },
-      { id: "finance.view", label: "View finance", labelNp: "वित्त हेर्ने", hint: "COD flow, commissions, settlements." },
+      { id: "finance.platform.view", label: "View platform finance", labelNp: "प्लेटफर्म वित्त हेर्ने", hint: "COD flow, commissions, settlements." },
+      { id: "finance.manage", label: "Reconcile, refund & settle", labelNp: "वित्त व्यवस्थापन", hint: "Release eligible escrow, issue refunds, and record bank or wallet settlement references." },
+    ],
+  },
+  {
+    resource: "settings",
+    label: "Platform settings",
+    labelNp: "प्लेटफर्म सेटिङ",
+    description: "Versioned operational rules and controlled feature rollout.",
+    permissions: [
+      { id: "settings.platform.view", label: "View platform configuration", labelNp: "प्लेटफर्म सेटिङ हेर्ने", hint: "Read configuration and feature-flag history." },
+      { id: "settings.platform.manage", label: "Manage platform configuration", labelNp: "प्लेटफर्म सेटिङ व्यवस्थापन", hint: "Create new configuration and feature-flag versions." },
     ],
   },
   {
@@ -162,6 +179,8 @@ export const PERMISSION_GROUPS: PermGroup[] = [
     description: "The audit trail and platform role management.",
     permissions: [
       { id: "audit.view", label: "View audit log", labelNp: "अडिट लग हेर्ने", hint: "Read the tamper-evident action trail." },
+      { id: "privacy.view", label: "View privacy compliance", labelNp: "गोपनीयता अनुपालन हेर्ने", hint: "Review retention, deletion lifecycle, and legal holds." },
+      { id: "privacy.manage", label: "Manage privacy compliance", labelNp: "गोपनीयता अनुपालन व्यवस्थापन", hint: "Place legal holds, update retention periods, and run expiry processing." },
       { id: "rbac.platform.manage", label: "Manage platform roles", labelNp: "भूमिका व्यवस्थापन", hint: "Create roles and assign staff." },
     ],
   },
@@ -227,6 +246,7 @@ export const DEFAULT_ROLES: Role[] = [
       "catalog.moderate",
       "analytics.platform.view",
       "support.view", "support.respond",
+      "settings.platform.view",
     ),
     color: "blue",
   },
@@ -254,6 +274,7 @@ export const DEFAULT_ROLES: Role[] = [
       "disputes.view", "disputes.resolve",
       "policy.view", "policy.publish",
       "audit.view",
+      "privacy.view", "privacy.manage",
     ),
     color: "green",
   },
@@ -262,7 +283,7 @@ export const DEFAULT_ROLES: Role[] = [
     name: "Finance Viewer",
     description: "Read-only financial and analytics visibility.",
     system: true,
-    permissions: only("admin.dashboard.view", "finance.view", "analytics.platform.view"),
+    permissions: only("admin.dashboard.view", "finance.platform.view", "analytics.platform.view"),
     color: "ink",
   },
 ];

@@ -10,23 +10,15 @@
  * disturbs a seller session and vice versa. Each store keeps its own module-free
  * closure state — one cache, one listener set, one in-flight refresh.
  *
- * ## Why the tokens are in `localStorage`
+ * ## What is persisted
  *
- * The API hands out bearer tokens in the response body (`POST /auth/otp/verify`)
- * and reads them from the `Authorization` header — there is no cookie in the
- * design, so the browser has to keep them somewhere reachable by JavaScript.
- * `localStorage` is chosen over `sessionStorage` so that a shopkeeper filling in
- * an application, or a reviewer working through a queue, is not signed out by
- * closing a tab, and over an in-memory store because a page reload would then end
- * the session mid-task.
- *
- * That choice is exposed to XSS by construction, and the mitigations that make it
- * acceptable are all server-side and already built: refresh tokens are single-use
- * and rotate on every refresh, replaying an old one is detected and revokes the
- * whole session, and the access token lives 15 minutes. An httpOnly cookie is the
- * right end state — especially for a console with privileged permissions — and it
- * needs an API change (a `Set-Cookie` on verify/refresh plus CSRF protection). It
- * is recorded as a follow-up rather than faked here.
+ * Browser clients use a host-only HttpOnly, SameSite=Strict refresh cookie. The
+ * live access token stays in this module's closure and neither bearer token is
+ * written to web storage. `localStorage` contains only the user snapshot plus
+ * blank token fields, which lets the UI restore its signed-in shell after a tab
+ * closes; the first authenticated call then rotates the cookie and obtains a new
+ * short-lived access token. Native clients do not use this store and keep their
+ * refresh tokens in operating-system secure storage.
  *
  * ## Refreshing
  *
@@ -37,7 +29,7 @@
  */
 
 import { ApiError, rawBlobRequest, rawRequest, type RequestOptions } from "./http";
-import type { ApiUser, TokenPair } from "./types";
+import type { ApiUser, AuthSurface, TokenPair } from "./types";
 
 /** Refresh this far ahead of expiry so a request never races the clock. */
 const REFRESH_SKEW_MS = 30_000;
@@ -91,8 +83,12 @@ const UNAUTHENTICATED = new ApiError({
  * One session store, keyed by `storageKey`. Call this once per app — two stores
  * on the same key would each hold their own cache of the same slot and drift.
  */
-export function createSessionStore(config: { storageKey: string }): SessionStore {
-  const { storageKey } = config;
+export function createSessionStore(config: {
+  storageKey: string;
+  cookieRefresh?: boolean;
+  surface?: AuthSurface;
+}): SessionStore {
+  const { storageKey, cookieRefresh = false, surface } = config;
 
   let current: Session | null = null;
   let loaded = false;
@@ -105,7 +101,16 @@ export function createSessionStore(config: { storageKey: string }): SessionStore
       const raw = window.localStorage.getItem(storageKey);
       if (!raw) return null;
       const parsed: unknown = JSON.parse(raw);
-      return isSession(parsed) ? parsed : null;
+      if (!isSession(parsed)) return null;
+      if (!cookieRefresh) return parsed;
+      // One-time migration from the old bearer-in-localStorage design. Existing
+      // sessions must sign in again because JavaScript cannot mint an HttpOnly
+      // cookie, but the old credentials are removed immediately on first load.
+      const sanitized = { ...parsed, accessToken: "", refreshToken: "", accessExpiresAt: 0 };
+      if (parsed.accessToken || parsed.refreshToken || parsed.accessExpiresAt !== 0) {
+        window.localStorage.setItem(storageKey, JSON.stringify(sanitized));
+      }
+      return sanitized;
     } catch {
       return null;
     }
@@ -114,8 +119,15 @@ export function createSessionStore(config: { storageKey: string }): SessionStore
   function write(session: Session | null): void {
     if (typeof window === "undefined") return;
     try {
-      if (session) window.localStorage.setItem(storageKey, JSON.stringify(session));
-      else window.localStorage.removeItem(storageKey);
+      if (session) {
+        // Persist only enough to restore the signed-in UI. In browser-cookie
+        // mode neither bearer token is readable from storage; the first API
+        // call after a reload rotates the HttpOnly refresh cookie.
+        const stored = cookieRefresh
+          ? { ...session, accessToken: "", refreshToken: "", accessExpiresAt: 0 }
+          : session;
+        window.localStorage.setItem(storageKey, JSON.stringify(stored));
+      } else window.localStorage.removeItem(storageKey);
     } catch {
       /* private mode / quota — the session then lasts only as long as this page */
     }
@@ -182,7 +194,15 @@ export function createSessionStore(config: { storageKey: string }): SessionStore
     try {
       const pair = await rawRequest<TokenPair>("/auth/refresh", {
         method: "POST",
-        body: { refreshToken: session.refreshToken },
+        body: cookieRefresh ? {} : { refreshToken: session.refreshToken },
+        ...(cookieRefresh
+          ? {
+              headers: {
+                "X-GoPasal-Auth-Mode": "cookie",
+                ...(surface ? { "X-GoPasal-Auth-Surface": surface } : {}),
+              },
+            }
+          : {}),
       });
       const next = sessionFrom(pair, session.user);
       setSession(next);

@@ -13,24 +13,78 @@ import {
   Phone,
   X,
   ChevronRight,
+  Heart,
+  UsersRound,
 } from "lucide-react";
 import type { Store } from "@/lib/data";
 import { ProductCard } from "@/components/ProductCard";
 import { Reveal } from "@/components/Reveal";
 import { Rating, Badge, Button } from "@/components/primitives";
 import { cn } from "@/lib/cn";
+import { customerApi, deliveryCheck, type DeliveryQuote } from "@/lib/api/customer";
+import { useDeliveryLocation } from "@/components/location/LocationProvider";
+import { useAuth, useSaved } from "@/components/providers";
+import { useRouter } from "next/navigation";
 
 export function StoreView({ store }: { store: Store }) {
+  const auth = useAuth();
+  const saved = useSaved();
+  const router = useRouter();
+  const deliveryLocation = useDeliveryLocation();
   const [contactOpen, setContactOpen] = React.useState(false);
+  const [delivery, setDelivery] = React.useState<DeliveryQuote | null>(null);
+  const [deliveryLoading, setDeliveryLoading] = React.useState(false);
+  const [groupBusy, setGroupBusy] = React.useState(false);
+  const shopSaved = saved.isShopSaved(store.id);
+
+  const toggleSaved = async () => {
+    if (auth.status !== "authenticated") {
+      router.push(`/login?next=${encodeURIComponent(`/store/${store.slug}`)}`);
+      return;
+    }
+    await saved.toggleShop(store.id);
+  };
+
+  const startGroup = async () => {
+    if (auth.status !== "authenticated") {
+      router.push(`/login?next=${encodeURIComponent(`/store/${store.slug}`)}`);
+      return;
+    }
+    setGroupBusy(true);
+    try {
+      const group = await customerApi.createGroupOrder(store.id);
+      router.push(`/group-orders/${group.id}`);
+    } finally {
+      setGroupBusy(false);
+    }
+  };
+
+  React.useEffect(() => {
+    if (!deliveryLocation.location) {
+      setDelivery(null);
+      return;
+    }
+    const controller = new AbortController();
+    setDeliveryLoading(true);
+    void deliveryCheck(store.id, deliveryLocation.location, controller.signal)
+      .then(setDelivery)
+      .catch(() => setDelivery(null))
+      .finally(() => setDeliveryLoading(false));
+    return () => controller.abort();
+  }, [deliveryLocation.location, store.id]);
 
   return (
     <>
       {/* breadcrumb */}
       <div className="gp-container pt-6">
         <nav className="flex items-center gap-1 text-sm text-ink-500">
-          <Link href="/" className="hover:text-crimson-600">Home</Link>
+          <Link href="/" className="hover:text-crimson-600">
+            Home
+          </Link>
           <ChevronRight className="h-4 w-4" />
-          <Link href="/shops" className="hover:text-crimson-600">Shops</Link>
+          <Link href="/shops" className="hover:text-crimson-600">
+            Shops
+          </Link>
           <ChevronRight className="h-4 w-4" />
           <span className="text-ink-800">{store.name}</span>
         </nav>
@@ -38,7 +92,12 @@ export function StoreView({ store }: { store: Store }) {
 
       {/* cover */}
       <div className="gp-container pt-4">
-        <div className={cn("relative h-48 overflow-hidden rounded-3xl bg-gradient-to-br md:h-60", store.cover)}>
+        <div
+          className={cn(
+            "relative h-48 overflow-hidden rounded-3xl bg-gradient-to-br md:h-60",
+            store.cover,
+          )}
+        >
           <div className="gp-dot-grid absolute inset-0 opacity-30" />
           <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-7xl md:text-8xl">
             {store.emoji}
@@ -65,32 +124,89 @@ export function StoreView({ store }: { store: Store }) {
               <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-ink-600">
                 <Rating value={store.rating} reviews={store.reviews} />
                 <span className="flex items-center gap-1">
-                  <MapPin className="h-4 w-4 text-crimson-500" /> {store.area} · {store.distanceKm.toFixed(1)} km
+                  <MapPin className="h-4 w-4 text-crimson-500" /> {store.area}
                 </span>
                 <span className="flex items-center gap-1">
                   <Clock className="h-4 w-4 text-crimson-500" /> {store.hours}
                 </span>
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
-                <Badge tone={store.isOpen ? "green" : "ink"}>{store.isOpen ? "● Open now" : "● Closed"}</Badge>
-                <Badge tone="crimson"><Truck className="h-3 w-3" /> Delivered by the shop</Badge>
-                <Badge tone="marigold"><Wallet className="h-3 w-3" /> Cash on delivery</Badge>
+                <Badge tone={store.isOpen ? "green" : "ink"}>
+                  {store.isOpen ? "● Open now" : "● Closed"}
+                </Badge>
+                <Badge tone="crimson">
+                  <Truck className="h-3 w-3" /> Delivered by the shop
+                </Badge>
+                <Badge tone="marigold">
+                  <Wallet className="h-3 w-3" /> Cash on delivery
+                </Badge>
                 {store.minOrder > 0 && <Badge tone="ink">Min. order रु {store.minOrder}</Badge>}
               </div>
             </div>
 
-            <div className="flex shrink-0 gap-3">
+            <div className="flex shrink-0 flex-wrap gap-3">
+              <Button
+                variant="outline"
+                onClick={() => void toggleSaved().catch(() => undefined)}
+                aria-pressed={shopSaved}
+              >
+                <Heart className={`h-4 w-4 ${shopSaved ? "fill-current text-crimson-600" : ""}`} />
+                {shopSaved ? "Saved" : "Save shop"}
+              </Button>
               <Button variant="outline" onClick={() => setContactOpen(true)}>
                 <MessageCircle className="h-4 w-4" /> Contact shopkeeper
+              </Button>
+              <Button disabled={groupBusy} onClick={() => void startGroup()}>
+                <UsersRound className="h-4 w-4" />
+                {groupBusy ? "Starting…" : "Order together"}
               </Button>
             </div>
           </div>
 
-          {/* delivery-timing honesty note */}
-          <p className="mt-5 rounded-xl bg-paper px-4 py-3 text-sm text-ink-600">
-            <span className="font-semibold text-ink-800">Delivery is handled by {store.name}.</span>{" "}
-            Timing depends on the shop and your area — message the shopkeeper to confirm before you order.
-          </p>
+          {!deliveryLocation.location ? (
+            <button
+              type="button"
+              onClick={deliveryLocation.openPicker}
+              className="mt-5 flex w-full items-center justify-between gap-3 rounded-xl bg-crimson-50 px-4 py-3 text-left text-sm text-crimson-800"
+            >
+              <span>
+                <strong className="block">Check whether this shop delivers to you</strong>
+                Choose your delivery location before adding items.
+              </span>
+              <span className="shrink-0 font-bold">Choose location</span>
+            </button>
+          ) : deliveryLoading ? (
+            <p className="mt-5 rounded-xl bg-paper px-4 py-3 text-sm text-ink-600">
+              Checking delivery to {deliveryLocation.location.label}…
+            </p>
+          ) : delivery?.deliverable ? (
+            <div className="mt-5 flex flex-col gap-2 rounded-xl bg-[#EAF7EF] px-4 py-3 text-sm text-[#0B684A] sm:flex-row sm:items-center sm:justify-between">
+              <span>
+                <strong className="block">Delivers to {deliveryLocation.location.label}</strong>
+                {(delivery.distanceMeters! / 1000).toFixed(1)} km away
+                {delivery.etaSeconds
+                  ? ` · about ${Math.max(1, Math.round(delivery.etaSeconds / 60))} min`
+                  : ""}
+              </span>
+              <strong className="shrink-0">
+                {delivery.fee === 0 ? "Free delivery" : `Delivery रु ${delivery.fee}`}
+              </strong>
+            </div>
+          ) : (
+            <div className="mt-5 flex flex-col gap-2 rounded-xl bg-crimson-50 px-4 py-3 text-sm text-crimson-800 sm:flex-row sm:items-center sm:justify-between">
+              <span>
+                <strong className="block">Not deliverable to this location</strong>
+                {delivery?.reason ?? "We could not verify this destination."}
+              </span>
+              <button
+                type="button"
+                onClick={deliveryLocation.openPicker}
+                className="shrink-0 font-bold"
+              >
+                Change location
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -100,7 +216,15 @@ export function StoreView({ store }: { store: Store }) {
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {store.products.map((p, i) => (
             <Reveal key={p.id} delay={i}>
-              <ProductCard product={p} store={store} />
+              <ProductCard
+                product={p}
+                store={store}
+                unavailableReason={
+                  delivery && !delivery.deliverable
+                    ? (delivery.reason ?? "Not deliverable here")
+                    : undefined
+                }
+              />
             </Reveal>
           ))}
         </div>
@@ -137,14 +261,28 @@ export function StoreView({ store }: { store: Store }) {
                 </button>
               </div>
               <p className="mt-1 text-sm text-ink-600">
-                Reach the owner or a staff member directly to ask about stock, delivery area or timing.
+                Reach the owner or a staff member directly to ask about stock, delivery area or
+                timing.
               </p>
               <div className="mt-5 space-y-3">
-                <ContactRow icon={Phone} title="Call the shop" sub="+977 98•• ••• •••" href="tel:+977980000000" />
-                <ContactRow icon={MessageCircle} title="Chat on GoPasal" sub="Usually replies during shop hours" href="#" />
+                <ContactRow
+                  icon={MessageCircle}
+                  title="Message securely in GoPasal"
+                  sub="Your number stays private. The shop can reply here."
+                  href={`/messages?shopId=${encodeURIComponent(store.id)}`}
+                />
+                {store.phone ? (
+                  <ContactRow
+                    icon={Phone}
+                    title="Call the shop"
+                    sub={`+977 ${store.phone}`}
+                    href={`tel:+977${store.phone}`}
+                  />
+                ) : null}
               </div>
               <p className="mt-4 text-xs text-ink-400">
-                Your phone number stays private — calls and chats are routed through GoPasal.
+                For privacy and a clear record, in-app messaging is recommended. The number shown is
+                the shop&apos;s verified public contact number.
               </p>
             </motion.div>
           </>

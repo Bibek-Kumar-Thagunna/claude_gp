@@ -1,5 +1,14 @@
 # GoPasal — Build Status, Gap Analysis & Division of Labour
 
+> **Archived historical audit (22 August 2026).** This file describes the
+> pre-integration prototype and is retained only as change history. It is not the
+> current release status. Use [`SRS_IMPLEMENTATION_MATRIX.md`](./SRS_IMPLEMENTATION_MATRIX.md)
+> for the current feature inventory and [`docs/runbooks/deploy.md`](./docs/runbooks/deploy.md)
+> for the production release procedure. The customer, seller, admin and rider
+> web surfaces are now connected to the persisted API; finance, privacy,
+> onboarding, messaging, delivery and release verification described below as
+> missing were implemented after this audit.
+
 **Audited:** 22 August 2026 · against `GoPasal SRS v3 — Ultra Detailed` (86 pp., Phases 1–10)
 **Auditor's stance:** every claim below is backed by a file, a line, or a count taken from the
 repository on the date above. Where I could not verify something — because this machine has no
@@ -85,8 +94,8 @@ resendable and revocable while pending, and SMS failure is recorded rather than 
 a gateway blip must not destroy a credential the owner can still read aloud.
 
 **Three consoles, visually.** 23 customer routes, 16 seller routes, 20 admin routes. Shared
-crimson design system in `packages/tokens`, hydration-safe fixed-instant formatting, a
-no-SDK map built on one Web-Mercator projection with Mapbox → OSM → canvas degradation.
+crimson design system in `packages/tokens`, hydration-safe fixed-instant formatting, and a
+MapLibre delivery map driven by API-provided Baato/Mapbox styles and an authenticated live feed.
 
 ---
 
@@ -430,7 +439,7 @@ in the API was inventoried and classified:
 |---|---|---|---|---|
 | SMS / OTP | `SMS_PROVIDER=log` — real OTP printed to the API log; optional JSONL outbox via `SMS_DEV_OUTBOX_FILE` | Sparrow SMS (`sparrow`) or Twilio (`twilio`) | **Yes — hard blocker.** Production refuses to boot on `log` | Done. 22 tests |
 | File / object storage | `STORAGE_PROVIDER=local` — real bytes under `apps/api/uploads`; the `public/` prefix is served back at `/uploads/public/<key>`, the `private/` prefix is outside the static tree and reachable only through an authorised route. MinIO available for the S3 path (`docker compose --profile s3 up -d minio`) | Any S3-compatible bucket: AWS, Cloudflare R2, DigitalOcean Spaces — **must not be public-read at the root**; grant anonymous read to `public/*` only | **Yes** — KYC documents, product images and proof-of-delivery photos must survive a redeploy | Provider + HTTP upload path done (113 tests); KYC wired, catalog images and PoD photos not yet |
-| Maps / routing / geocoding | `MAP_PROVIDER=osm` — real great-circle distance, `degraded: true`, key-free MapLibre style; reverse geocoding returns `null`, never an invented address | Mapbox (`MAPBOX_ACCESS_TOKEN`) | No — optional quality upgrade. GoPasal promises no ETAs, so a routed distance is not load-bearing | Done. 15 + 9 tests |
+| Maps / routing / geocoding | `MAP_PROVIDER=osm` — real great-circle distance, `degraded: true`, key-free MapLibre style; reverse geocoding returns `null`, never an invented address | Baato (`BAATO_ACCESS_TOKEN`, separate origin-restricted `BAATO_BROWSER_ACCESS_TOKEN`); Mapbox remains supported | **Yes for the intended Nepal experience.** OSM is an explicit degraded fallback, never presented as road routing | Baato map/search/place/reverse/bike-route adapter, saved exact-gate picker and Socket.IO rider map done |
 | Payments — Cash on Delivery | Fully implemented; no gateway exists to emulate | Same code | No external dependency | Done. Carries the entire local flow |
 | Payments — eSewa / Khalti | **Deliberately none.** Sandbox base URLs are pre-configured; the method reports `enabled: false` and *rejects* if reached | eSewa ePay v2, Khalti ePayment v2 | Only if launching with digital payments | Not implemented (tasks #86/#87). Refuses rather than fabricating a redirect. 14 tests |
 | Push notifications | `PUSH_PROVIDER=log`, `delivers === false`. In-app notifications are database rows and fully work | FCM — not implemented; needs a device-token registry first | No — deferred with the mobile apps | Honest placeholder. `PUSH_PROVIDER=fcm` is refused at boot |
@@ -546,7 +555,7 @@ adapters with zero credentials. This is the list for **production deployment**, 
 | **Redis host / port / password** (`REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`) | Hard blocker — sessions, the OTP store, socket fan-out and BullMQ all live here. | Read discretely, never as a URL. Use a password in production; the dev container has none. |
 | **Object storage**: bucket + access key + secret (`S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, plus `S3_ENDPOINT`/`S3_REGION` for non-AWS) | Needed the moment real KYC documents, product images or proof-of-delivery photos exist — local disk does not survive a redeploy. | AWS, Cloudflare R2, DigitalOcean Spaces and MinIO all work against the same hand-rolled SigV4 signer. Optional `S3_PUBLIC_BASE_URL` for a CDN in front. |
 | Domain + DNS for `gopasal.com`, `seller.`, `admin.`, `api.` + TLS | Deployment | — |
-| **Mapbox** token (`MAPBOX_ACCESS_TOKEN`, and `NEXT_PUBLIC_MAPBOX_TOKEN` for the browser) | Nicer tiles and true road routing | **Optional.** Degrades to OpenStreetMap, then to a stylised canvas. GoPasal shows distance remaining and never an ETA, so nothing depends on a routed number. |
+| **Baato Maps** server token (`BAATO_ACCESS_TOKEN`) plus a separate browser token (`BAATO_BROWSER_ACCESS_TOKEN`) restricted to the customer-site origins | Nepal map tiles, location search, place resolution, reverse geocoding and bike routing | **Required for the intended production location experience.** The API returns only the browser-safe style URL. Requests are debounced and cached within Baato's published free-account rules. |
 | **eSewa** (`ESEWA_MERCHANT_CODE`, `ESEWA_SECRET`) and/or **Khalti** (`KHALTI_SECRET_KEY`) | Digital payments only. COD needs nothing. | Needs a registered business. Not urgent — the integration itself is not written yet (§5c, tasks #86/#87), so obtaining these before the finance milestone lands buys nothing. |
 | **Sentry DSN** (or equivalent) | Error tracking — none exists today | Recommended before real users; not a boot blocker. |
 | **Firebase project** + FCM credentials | Push notifications | Deferred with the mobile apps. `PUSH_PROVIDER=fcm` is refused at boot until a device-token registry exists, so do not buy this yet. |
@@ -702,4 +711,3 @@ Not "it renders". All of the following, demonstrably:
 
 Until that list is green, the honest answer to "is it ready for the real market" stays no — and I
 will keep giving you the honest answer rather than the encouraging one.
-

@@ -3,6 +3,7 @@ import { Prisma, type Coupon } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { paginate, type Paginated } from '../../common/dto/pagination.dto';
 import type { ListShopCouponsQueryDto } from './dto/coupons.dto';
+import { STOREFRONT_SHOP_WHERE } from '../catalog/storefront-eligibility';
 
 export interface CouponQuote {
   couponId: string;
@@ -10,7 +11,24 @@ export interface CouponQuote {
   type: 'PERCENT' | 'FLAT';
   value: number;
   discount: number;
+  platformFunded: boolean;
 }
+
+type CouponQuoteReader = Pick<Prisma.TransactionClient, 'coupon' | 'couponRedemption'>;
+
+const CUSTOMER_OFFER_SELECT = {
+  id: true,
+  code: true,
+  shopId: true,
+  type: true,
+  value: true,
+  minOrder: true,
+  maxDiscount: true,
+  validTo: true,
+  perUserLimit: true,
+} satisfies Prisma.CouponSelect;
+
+type CustomerOfferRow = Prisma.CouponGetPayload<{ select: typeof CUSTOMER_OFFER_SELECT }>;
 
 /**
  * The counts beside every page of a shop's coupons, over **every coupon the shop
@@ -103,9 +121,99 @@ function idleCouponFilter(
 export class CouponsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /** Marketing-safe coupon projection for the customer shop and checkout UI. */
+  async listPublicOffers(shopSlug: string) {
+    return (await this.runningOfferRows(shopSlug)).map((row) => this.presentOffer(row));
+  }
+
+  /**
+   * Checkout-safe offers for one signed-in customer.
+   *
+   * The public list can advertise a campaign, but it cannot know whether this
+   * customer has exhausted `perUserLimit`. Checkout must use this list so it never
+   * presents a known-unusable coupon with an Apply button. Released redemptions do
+   * not count: cancellation restores both the campaign counter and the customer's
+   * entitlement in `releaseForOrder`.
+   */
+  async listCustomerOffers(shopSlug: string, userId: string) {
+    const rows = await this.runningOfferRows(shopSlug);
+    if (rows.length === 0) return [];
+
+    const redemptionCounts = await this.prisma.couponRedemption.groupBy({
+      by: ['couponId'],
+      where: {
+        couponId: { in: rows.map((row) => row.id) },
+        userId,
+        releasedAt: null,
+      },
+      _count: { _all: true },
+    });
+    const usedByCoupon = new Map(
+      redemptionCounts.map((redemption) => [redemption.couponId, redemption._count._all]),
+    );
+
+    return rows
+      .filter((row) => (usedByCoupon.get(row.id) ?? 0) < row.perUserLimit)
+      .map((row) => this.presentOffer(row));
+  }
+
+  private async runningOfferRows(shopSlug: string): Promise<CustomerOfferRow[]> {
+    const shop = await this.prisma.shop.findFirst({
+      where: { slug: shopSlug, ...STOREFRONT_SHOP_WHERE },
+      select: { id: true },
+    });
+    if (!shop) throw new NotFoundException('Shop not found');
+    const now = new Date();
+    const running = runningCouponFilter(now, this.prisma.coupon.fields.usageLimit);
+    const rows = await this.prisma.coupon.findMany({
+      where: { AND: [running, { OR: [{ shopId: null }, { shopId: shop.id }] }] },
+      orderBy: [{ shopId: 'desc' }, { createdAt: 'desc' }],
+      take: 20,
+      select: CUSTOMER_OFFER_SELECT,
+    });
+    return rows;
+  }
+
+  private presentOffer(row: CustomerOfferRow) {
+    return {
+      code: row.code,
+      type: row.type,
+      value: row.value,
+      minOrder: row.minOrder,
+      maxDiscount: row.maxDiscount,
+      validTo: row.validTo,
+      scope: row.shopId ? 'SHOP' : 'PLATFORM',
+      title: row.type === 'FLAT' ? `Rs ${row.value} off` : `${row.value}% off`,
+      detail: [
+        row.minOrder > 0 ? `on orders above Rs ${row.minOrder}` : 'on this order',
+        row.type === 'PERCENT' && row.maxDiscount ? `up to Rs ${row.maxDiscount}` : null,
+      ].filter(Boolean).join(' · '),
+    };
+  }
+
+  listPlatformCoupons() {
+    return this.prisma.coupon.findMany({ where: { shopId: null }, orderBy: { createdAt: 'desc' }, take: 200 });
+  }
+
+  async updatePlatform(id: string, data: { isActive?: boolean; minOrder?: number; usageLimit?: number; validTo?: Date }) {
+    await this.mustPlatformOwn(id);
+    return this.prisma.coupon.update({ where: { id }, data });
+  }
+
+  async deactivatePlatform(id: string) {
+    await this.mustPlatformOwn(id);
+    return this.prisma.coupon.update({ where: { id }, data: { isActive: false } });
+  }
+
   /** Validate a coupon for a user/shop/subtotal and return the computed discount. */
-  async quote(code: string, userId: string, shopId: string, subtotal: number): Promise<CouponQuote> {
-    const coupon = await this.prisma.coupon.findUnique({ where: { code: code.trim().toUpperCase() } });
+  async quote(
+    code: string,
+    userId: string,
+    shopId: string,
+    subtotal: number,
+    db: CouponQuoteReader = this.prisma,
+  ): Promise<CouponQuote> {
+    const coupon = await db.coupon.findUnique({ where: { code: code.trim().toUpperCase() } });
     if (!coupon || !coupon.isActive) throw new BadRequestException('Invalid coupon');
 
     const now = new Date();
@@ -117,15 +225,22 @@ export class CouponsService {
     if (coupon.usageLimit != null && coupon.usedCount >= coupon.usageLimit)
       throw new BadRequestException('Coupon usage limit reached');
 
-    const usedByUser = await this.prisma.couponRedemption.count({
-      where: { couponId: coupon.id, userId },
+    const usedByUser = await db.couponRedemption.count({
+      where: { couponId: coupon.id, userId, releasedAt: null },
     });
     if (usedByUser >= coupon.perUserLimit) throw new BadRequestException('Coupon already used');
 
     const discount = this.computeDiscount(coupon, subtotal);
     if (discount <= 0) throw new BadRequestException('Coupon gives no discount on this order');
 
-    return { couponId: coupon.id, code: coupon.code, type: coupon.type, value: coupon.value, discount };
+    return {
+      couponId: coupon.id,
+      code: coupon.code,
+      type: coupon.type,
+      value: coupon.value,
+      discount,
+      platformFunded: coupon.shopId === null,
+    };
   }
 
   /** Record a redemption + bump usedCount. MUST run inside the order transaction. */
@@ -136,8 +251,53 @@ export class CouponsService {
     orderId: string,
     amount: number,
   ) {
+    // `$executeRaw`, not `$queryRaw`.
+    //
+    // `pg_advisory_xact_lock()` returns `void`, and `$queryRaw` tries to
+    // deserialize the result set it gets back: Prisma has no mapping for a void
+    // column, so it threw P2010 "Failed to deserialize column of type 'void'"
+    // — every single time, for every customer. The exception filter turns an
+    // unmapped Prisma code into a flat 400 `Database request error.`, so the
+    // whole coupon feature failed with a message that named neither coupons nor
+    // the lock. `$executeRaw` issues the statement without reading rows back,
+    // which is what a lock acquisition wants anyway.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${couponId}), hashtext(${userId}))`;
+    const coupon = await tx.coupon.findUnique({ where: { id: couponId } });
+    if (!coupon || !coupon.isActive) throw new BadRequestException('Invalid coupon');
+    const now = new Date();
+    if (coupon.validFrom > now || (coupon.validTo && coupon.validTo < now)) {
+      throw new BadRequestException('Coupon is not active');
+    }
+    const activeForUser = await tx.couponRedemption.count({
+      where: { couponId, userId, releasedAt: null },
+    });
+    if (activeForUser >= coupon.perUserLimit) throw new BadRequestException('Coupon already used');
+    const claimed = await tx.coupon.updateMany({
+      where: {
+        id: couponId,
+        isActive: true,
+        validFrom: { lte: now },
+        AND: [
+          { OR: [{ validTo: null }, { validTo: { gte: now } }] },
+          ...(coupon.usageLimit == null ? [] : [{ usedCount: { lt: coupon.usageLimit } }]),
+        ],
+      },
+      data: { usedCount: { increment: 1 } },
+    });
+    if (claimed.count !== 1) throw new BadRequestException('Coupon usage limit reached');
     await tx.couponRedemption.create({ data: { couponId, userId, orderId, amount } });
-    await tx.coupon.update({ where: { id: couponId }, data: { usedCount: { increment: 1 } } });
+  }
+
+  async releaseForOrder(tx: Prisma.TransactionClient, orderId: string) {
+    const redemption = await tx.couponRedemption.findUnique({ where: { orderId } });
+    if (!redemption || redemption.releasedAt) return;
+    const released = await tx.couponRedemption.updateMany({
+      where: { id: redemption.id, releasedAt: null },
+      data: { releasedAt: new Date() },
+    });
+    if (released.count === 1) {
+      await tx.coupon.update({ where: { id: redemption.couponId }, data: { usedCount: { decrement: 1 } } });
+    }
   }
 
   private computeDiscount(coupon: { type: string; value: number; maxDiscount: number | null }, subtotal: number) {
@@ -223,6 +383,12 @@ export class CouponsService {
     if (exists) throw new BadRequestException('Coupon code already exists');
     if (data.type === 'PERCENT' && (data.value < 1 || data.value > 100))
       throw new BadRequestException('Percent value must be 1–100');
+    if (data.type === 'FLAT' && data.value < 1)
+      throw new BadRequestException('Flat value must be positive');
+    if (data.validTo && data.validTo <= (data.validFrom ?? new Date()))
+      throw new BadRequestException('Coupon expiry must be after its start');
+    if ((data.perUserLimit ?? 1) < 1 || (data.usageLimit != null && data.usageLimit < 1))
+      throw new BadRequestException('Coupon limits must be positive');
     return this.prisma.coupon.create({ data: { ...data, code } });
   }
 
@@ -288,6 +454,12 @@ export class CouponsService {
     if (!coupon) throw new NotFoundException('Coupon not found');
     if (shopScope !== null && coupon.shopId !== shopScope)
       throw new NotFoundException('Coupon not found');
+    return coupon;
+  }
+
+  private async mustPlatformOwn(id: string) {
+    const coupon = await this.prisma.coupon.findUnique({ where: { id } });
+    if (!coupon || coupon.shopId !== null) throw new NotFoundException('Coupon not found');
     return coupon;
   }
 }

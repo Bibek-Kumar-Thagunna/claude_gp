@@ -3,12 +3,12 @@
 import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Menu, Bell, Globe, Search, LogOut, ShieldCheck } from "lucide-react";
+import { Menu, Bell, Globe, LogOut, ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/cn";
-import { useAdmin, useLang } from "@/components/providers";
+import { useLang } from "@/components/providers";
 import { useAuth } from "@/components/auth-provider";
 import { useOpenApplicationCount } from "@/components/use-open-applications";
-import { initials, ago } from "@/lib/format";
+import { initials } from "@/lib/format";
 
 /**
  * The chrome shows who is signed in and what is waiting.
@@ -22,7 +22,6 @@ import { initials, ago } from "@/lib/format";
 export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
   const router = useRouter();
   const { lang, setLang } = useLang();
-  const { disputes, fraud, tickets, audit } = useAdmin();
   const { user, roleName, signOut } = useAuth();
   const waiting = useOpenApplicationCount();
 
@@ -56,35 +55,8 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
               },
             ]
           : []),
-        ...fraud
-          .filter((f) => f.status === "OPEN")
-          .map((f) => ({
-            id: `fraud-${f.id}`,
-            href: "/fraud",
-            title: f.reason,
-            meta: `${f.subjectLabel} · ${ago(f.createdAt)}`,
-            tone: "red" as const,
-          })),
-        ...disputes
-          .filter((d) => d.status === "OPEN")
-          .map((d) => ({
-            id: `dispute-${d.id}`,
-            href: "/disputes",
-            title: `Dispute on ${d.orderCode}`,
-            meta: `${d.reason} · ${ago(d.createdAt)}`,
-            tone: "crimson" as const,
-          })),
-        ...tickets
-          .filter((t) => t.status === "OPEN" && (t.priority === "HIGH" || t.priority === "URGENT"))
-          .map((t) => ({
-            id: `ticket-${t.id}`,
-            href: "/support",
-            title: `${t.code} · ${t.subject}`,
-            meta: `${t.priority} priority · ${ago(t.createdAt)}`,
-            tone: "blue" as const,
-          })),
       ].slice(0, 8),
-    [waiting, fraud, disputes, tickets],
+    [waiting],
   );
 
   const DOT: Record<string, string> = {
@@ -112,15 +84,6 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
       </div>
 
       <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
-        <div className="relative hidden md:block">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
-          <input
-            type="search"
-            placeholder="Search shops, users, orders…"
-            className="h-10 w-60 rounded-lg border border-ink-200 bg-white pl-9 pr-3 text-sm outline-none transition-colors placeholder:text-ink-400 focus:border-crimson-300"
-          />
-        </div>
-
         <button
           type="button"
           onClick={() => setLang(lang === "en" ? "np" : "en")}
@@ -173,7 +136,7 @@ export function Topbar({ onOpenMenu }: { onOpenMenu: () => void }) {
                 onClick={() => setBellOpen(false)}
                 className="block border-t border-ink-100 px-3 py-2.5 text-center text-xs font-semibold text-crimson-600 hover:bg-crimson-50"
               >
-                View the full audit trail ({audit.length})
+                View the full audit trail
               </Link>
             </div>
           )}

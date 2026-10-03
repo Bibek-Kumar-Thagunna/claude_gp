@@ -1,10 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { EventEmitter2 } from '@nestjs/event-emitter';
-import { PrismaService } from '../../common/prisma/prisma.service';
-import { RedisService } from '../../common/redis/redis.service';
-import { EVENTS, type RiderLocationEvent } from '../../common/events';
-import type { AppConfig } from '../../config/configuration';
+import { Injectable, Logger } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import { EventEmitter2 } from "@nestjs/event-emitter";
+import { PrismaService } from "../../common/prisma/prisma.service";
+import { RedisService } from "../../common/redis/redis.service";
+import { EVENTS, type RiderLocationEvent } from "../../common/events";
+import type { AppConfig } from "../../config/configuration";
 
 export interface RiderPing {
   lat: number;
@@ -49,7 +49,7 @@ export class RiderLocationService {
     private readonly events: EventEmitter2,
     config: ConfigService<AppConfig, true>,
   ) {
-    const rt = config.get('realtime', { infer: true });
+    const rt = config.get("realtime", { infer: true });
     this.pingMinIntervalMs = rt.riderPingMinIntervalMs;
     this.staleMs = rt.riderLocationStaleMs;
     this.offlineMs = rt.riderOfflineMs;
@@ -72,11 +72,22 @@ export class RiderLocationService {
 
     // 1) always refresh the hot copy in Redis (TTL = offline threshold)
     const payload = { ...ping, at: at.toISOString(), orderId: orderId ?? undefined };
-    await this.redis.client.set(this.locKey(riderId), JSON.stringify(payload), 'PX', this.offlineMs);
+    await this.redis.client.set(
+      this.locKey(riderId),
+      JSON.stringify(payload),
+      "PX",
+      this.offlineMs,
+    );
 
     // 2) throttle the durable write — first pinger in the window wins the gate
-    const gate = await this.redis.client.set(this.dbGateKey(riderId), '1', 'PX', this.pingMinIntervalMs, 'NX');
-    if (gate === 'OK') {
+    const gate = await this.redis.client.set(
+      this.dbGateKey(riderId),
+      "1",
+      "PX",
+      this.pingMinIntervalMs,
+      "NX",
+    );
+    if (gate === "OK") {
       await this.prisma.rider
         .update({
           where: { id: riderId },
@@ -93,7 +104,7 @@ export class RiderLocationService {
         // can hand back anything, and losing the ping's durable copy is not
         // worth failing the request over — Redis still has the fresh position.
         .catch((e: unknown) => {
-          const reason = e instanceof Error ? e.message : 'unknown error';
+          const reason = e instanceof Error ? e.message : "unknown error";
           this.logger.warn(`Rider ${riderId} DB location write skipped: ${reason}`);
         });
     }
@@ -110,7 +121,15 @@ export class RiderLocationService {
       at: at.toISOString(),
     } satisfies RiderLocationEvent);
 
-    return { riderId, orderId: orderId ?? undefined, ...ping, at: at.toISOString(), ageMs: 0, stale: false, offline: false };
+    return {
+      riderId,
+      orderId: orderId ?? undefined,
+      ...ping,
+      at: at.toISOString(),
+      ageMs: 0,
+      stale: false,
+      offline: false,
+    };
   }
 
   /** Latest known position for a rider (Redis first, DB fallback). */
@@ -122,12 +141,25 @@ export class RiderLocationService {
     }
     const rider = await this.prisma.rider.findUnique({
       where: { id: riderId },
-      select: { lat: true, lng: true, heading: true, speed: true, accuracy: true, lastPingAt: true },
+      select: {
+        lat: true,
+        lng: true,
+        heading: true,
+        speed: true,
+        accuracy: true,
+        lastPingAt: true,
+      },
     });
     if (!rider?.lat || !rider.lng || !rider.lastPingAt) return null;
     return this.snapshot(
       riderId,
-      { lat: rider.lat, lng: rider.lng, heading: rider.heading ?? undefined, speed: rider.speed ?? undefined, accuracy: rider.accuracy ?? undefined },
+      {
+        lat: rider.lat,
+        lng: rider.lng,
+        heading: rider.heading ?? undefined,
+        speed: rider.speed ?? undefined,
+        accuracy: rider.accuracy ?? undefined,
+      },
       rider.lastPingAt.toISOString(),
     );
   }
@@ -140,23 +172,29 @@ export class RiderLocationService {
   async latestForOrder(orderId: string): Promise<RiderLocationSnapshot | null> {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
-      select: { status: true, delivery: { select: { riderId: true } } },
+      select: { status: true, delivery: { select: { riderId: true, status: true } } },
     });
-    if (!order || order.status !== 'OUT_FOR_DELIVERY' || !order.delivery?.riderId) return null;
+    if (
+      !order ||
+      order.status !== "OUT_FOR_DELIVERY" ||
+      order.delivery?.status !== "EN_ROUTE" ||
+      !order.delivery.riderId
+    )
+      return null;
     return this.latest(order.delivery.riderId);
   }
 
   /** Cache + return the rider's current active order id (delivery in flight). */
   async activeOrderId(riderId: string): Promise<string | null> {
     const cached = await this.redis.client.get(this.orderKey(riderId));
-    if (cached) return cached === '-' ? null : cached;
+    if (cached) return cached === "-" ? null : cached;
     const delivery = await this.prisma.delivery.findFirst({
-      where: { riderId, status: { in: ['ASSIGNED', 'PICKED_UP', 'EN_ROUTE'] } },
+      where: { riderId, status: { in: ["ASSIGNED", "PICKED_UP", "EN_ROUTE"] } },
       select: { orderId: true },
-      orderBy: { assignedAt: 'desc' },
+      orderBy: { assignedAt: "desc" },
     });
     const value = delivery?.orderId ?? null;
-    await this.redis.client.set(this.orderKey(riderId), value ?? '-', 'EX', 30);
+    await this.redis.client.set(this.orderKey(riderId), value ?? "-", "EX", 30);
     return value;
   }
 
@@ -165,7 +203,12 @@ export class RiderLocationService {
     await this.redis.client.del(this.orderKey(riderId));
   }
 
-  private snapshot(riderId: string, p: RiderPing, atIso: string, orderId?: string): RiderLocationSnapshot {
+  private snapshot(
+    riderId: string,
+    p: RiderPing,
+    atIso: string,
+    orderId?: string,
+  ): RiderLocationSnapshot {
     const ageMs = Date.now() - new Date(atIso).getTime();
     return {
       riderId,

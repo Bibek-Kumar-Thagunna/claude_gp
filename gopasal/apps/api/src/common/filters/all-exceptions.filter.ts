@@ -32,6 +32,34 @@ import { sanitize } from '../interceptors/sanitize.interceptor';
 const ENVELOPE_KEYS = new Set(['statusCode', 'error', 'message', 'path', 'timestamp']);
 
 /**
+ * The `error` label for a status, matching the words Nest puts in the same
+ * field when it builds the body itself — so a client cannot tell whether the
+ * handler threw with a string or an object. Anything unlisted falls back to the
+ * exception's own class name, which is still honest and still not "Internal
+ * Server Error".
+ */
+const REASON_PHRASE: Record<number, string> = {
+  400: 'Bad Request',
+  401: 'Unauthorized',
+  403: 'Forbidden',
+  404: 'Not Found',
+  409: 'Conflict',
+  410: 'Gone',
+  413: 'Payload Too Large',
+  415: 'Unsupported Media Type',
+  422: 'Unprocessable Entity',
+  429: 'Too Many Requests',
+  500: 'Internal Server Error',
+  502: 'Bad Gateway',
+  503: 'Service Unavailable',
+  504: 'Gateway Timeout',
+};
+
+function reasonPhrase(status: number, fallback: string): string {
+  return REASON_PHRASE[status] ?? fallback;
+}
+
+/**
  * Whatever was thrown, as one line for the server log.
  *
  * `exception.stack` is passed to the logger separately, but a throw is not
@@ -51,6 +79,22 @@ function describe(exception: unknown): string {
   return String(exception);
 }
 
+/**
+ * Bearer credentials occasionally have to travel in a path (an invitation link
+ * and the phone-only location capture link). Request URLs are echoed in the
+ * error envelope and written to logs, so redact those segments before either
+ * happens. Ordinary record ids remain visible for operations/debugging.
+ */
+export function redactRequestUrl(url: string): string {
+  return url
+    .replace(
+      /(\/invites\/)(?!mine(?:\/|$)|accept(?:\/|$))[^/?#]+/g,
+      '$1[REDACTED]',
+    )
+    .replace(/(\/public\/location-captures\/)[^/?#]+/g, '$1[REDACTED]')
+    .replace(/(\/notifications\/devices\/)[^/?#]+/g, '$1[REDACTED]');
+}
+
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger('Exception');
@@ -59,6 +103,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const ctx = host.switchToHttp();
     const res = ctx.getResponse<Response>();
     const req = ctx.getRequest<Request>();
+    const safeUrl = redactRequestUrl(req.url);
 
     // A plain number, not the HttpStatus enum: `getStatus()` returns any integer
     // a handler chose, and the >= 500 test below is a numeric range check rather
@@ -67,12 +112,24 @@ export class AllExceptionsFilter implements ExceptionFilter {
     let message: string | string[] = 'Internal server error';
     let error = 'InternalServerError';
     let details: Record<string, unknown> = {};
+    // Set by the branches that write their own, richer log line, so the
+    // catch-all 4xx logger at the end does not repeat them.
+    let logged = false;
 
     if (exception instanceof HttpException) {
       status = exception.getStatus();
       const body: unknown = exception.getResponse();
       if (typeof body === 'string') {
         message = body;
+        // `error` must describe the status, not the field's initial value.
+        // Nest builds an object body for `new BadRequestException('text')` and
+        // fills `error` itself, but an exception thrown as
+        // `new HttpException('text', status)` — which is what the OTP cooldown
+        // and Nest's own ThrottlerException do — hands back a bare string, and
+        // this branch never touched `error`. Every one of those answers went out
+        // as `{"statusCode":429,"error":"InternalServerError"}`: a rate limit
+        // reported to the caller, and to our own logs, as a server crash.
+        error = reasonPhrase(status, exception.name);
       } else if (typeof body === 'object' && body) {
         // Nest's own validation pipe puts a string[] in `message`; everything
         // else puts a string. Read both shapes and ignore anything unexpected
@@ -99,9 +156,23 @@ export class AllExceptionsFilter implements ExceptionFilter {
         message = 'Record not found.';
         error = 'NotFound';
       } else {
+        // Every other Prisma code — P2021 (table missing), P2022 (column
+        // missing), P2023 (inconsistent column data), P2010 (raw query failed)
+        // — means the running database does not match the schema the client was
+        // generated from, almost always because a migration has not been
+        // applied. The caller gets the same flat 400 either way, and until now
+        // nothing was written to the log for it: the branch below 500 does not
+        // log, so an unmigrated column produced a silent "Database request
+        // error." on every screen that touched it and no line anywhere saying
+        // which column. The code and Prisma's own message are server-side
+        // detail (they name tables and columns), so they go to the log only.
         status = HttpStatus.BAD_REQUEST;
         message = 'Database request error.';
         error = 'BadRequest';
+        this.logger.error(
+          `${req.method} ${safeUrl} \u2192 400 (Prisma ${exception.code}): ${exception.message}`,
+        );
+        logged = true;
       }
     } else if (exception instanceof Prisma.PrismaClientValidationError) {
       // Not a `PrismaClientKnownRequestError` — it never reaches the database, so
@@ -119,7 +190,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
       status = HttpStatus.BAD_REQUEST;
       message = 'Database request error.';
       error = 'BadRequest';
-      this.logger.warn(`${req.method} ${req.url} → 400 (Prisma validation): ${exception.message}`);
+      this.logger.warn(`${req.method} ${safeUrl} → 400 (Prisma validation): ${exception.message}`);
+      logged = true;
     }
     // No `else if (exception instanceof Error) { message = exception.message }`.
     // That branch used to exist, and it is how the internals of every unhandled
@@ -131,12 +203,28 @@ export class AllExceptionsFilter implements ExceptionFilter {
     // to shopkeepers. An unrecognised throw keeps the `status`/`message`/`error`
     // this method opened with, and the real text goes to the log below.
 
+    // Outside production, record every rejection the caller sees.
+    //
+    // A 4xx is a deliberate, already-sanitised answer, so unlike a 500 there is
+    // nothing here to withhold from the log \u2014 and withholding it is what made
+    // whole flows undebuggable: a rider tapping "on the way" and getting
+    // "Delivery status changed; refresh before taking the next step", or an
+    // invitation that silently 403s, left no trace at all on the server. The
+    // developer watching `pnpm dev:api` now sees the same sentence the app
+    // showed, next to the route that produced it. Production is excluded
+    // because there a 4xx is ordinary traffic \u2014 a wrong OTP is not an incident,
+    // and logging every one at volume buries the errors that matter.
+    if (status >= 400 && status < 500 && !logged && process.env.APP_ENV !== 'production') {
+      const text = Array.isArray(message) ? message.join('; ') : message;
+      this.logger.warn(`${req.method} ${safeUrl} \u2192 ${status} ${error}: ${text}`);
+    }
+
     if (status >= 500) {
       // A server-side failure's internals are not the caller's business — the
       // same rule the pass-through above follows, applied to the message too.
       details = {};
       this.logger.error(
-        `${req.method} ${req.url} → ${status}: ${describe(exception)}`,
+        `${req.method} ${safeUrl} → ${status}: ${describe(exception)}`,
         exception instanceof Error ? exception.stack : undefined,
       );
     }
@@ -146,7 +234,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       error,
       message,
       ...this.passThrough(details),
-      path: req.url,
+      path: safeUrl,
       timestamp: new Date().toISOString(),
     });
   }

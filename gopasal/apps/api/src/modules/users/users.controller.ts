@@ -1,8 +1,15 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Put } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
+import type { Response } from 'express';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import { AddressesService } from './addresses.service';
-import { AddressDto, UpdateAddressDto, UpdateProfileDto } from './dto/users.dto';
+import {
+  AddressDto,
+  DeleteAccountDto,
+  UpdateAddressDto,
+  UpdateProfileDto,
+} from './dto/users.dto';
 import { UsersService } from './users.service';
 
 @ApiTags('users')
@@ -22,6 +29,37 @@ export class UsersController {
   @Patch()
   update(@CurrentUser('id') userId: string, @Body() dto: UpdateProfileDto) {
     return this.users.update(userId, dto);
+  }
+
+  @Throttle({ default: { ttl: 60_000, limit: 2 } })
+  @Get('data-export')
+  async exportData(
+    @CurrentUser('id') userId: string,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const date = new Date().toISOString().slice(0, 10);
+    response.setHeader('Content-Type', 'application/json; charset=utf-8');
+    response.setHeader('Content-Disposition', `attachment; filename="gopasal-data-${date}.json"`);
+    response.setHeader('Cache-Control', 'private, no-store, max-age=0');
+    response.setHeader('Pragma', 'no-cache');
+    return this.users.exportData(userId);
+  }
+
+  @Get('deletion-eligibility')
+  deletionEligibility(@CurrentUser('id') userId: string) {
+    return this.users.deletionEligibility(userId);
+  }
+
+  @Throttle({ default: { ttl: 60_000, limit: 3 } })
+  @Post('deletion-code')
+  requestDeletionCode(@CurrentUser('id') userId: string) {
+    return this.users.requestDeletionCode(userId);
+  }
+
+  @Throttle({ default: { ttl: 60_000, limit: 5 } })
+  @Delete()
+  deleteAccount(@CurrentUser('id') userId: string, @Body() dto: DeleteAccountDto) {
+    return this.users.deleteAccount(userId, dto.code, dto.reason);
   }
 
   @Get('addresses')

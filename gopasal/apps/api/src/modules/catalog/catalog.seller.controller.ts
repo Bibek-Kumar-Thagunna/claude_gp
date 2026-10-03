@@ -8,10 +8,12 @@ import {
   Post,
   Put,
   Query,
+  Res,
   UploadedFile as FilePart,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
 import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import { MULTIPART_HARD_LIMIT_BYTES } from '../../config/configuration';
@@ -20,6 +22,7 @@ import type { UploadedFile } from '../uploads/uploaded-file';
 import {
   AdjustStockDto,
   CreateProductDto,
+  ImportProductsQueryDto,
   ListShopProductsQueryDto,
   ReorderProductImagesDto,
   UpdateProductDto,
@@ -27,6 +30,7 @@ import {
   UpdateVariantDto,
   VariantDto,
 } from './dto/catalog.dto';
+import { CatalogImportService } from './catalog-import.service';
 import { PRODUCT_IMAGE_LIMIT } from './product-images';
 import { ProductsService } from './products.service';
 import { ShopsService } from './shops.service';
@@ -39,6 +43,7 @@ export class CatalogSellerController {
   constructor(
     private readonly shops: ShopsService,
     private readonly products: ProductsService,
+    private readonly importer: CatalogImportService,
   ) {}
 
   // shops — a shop cannot be created here. It comes into existence when GoPasal
@@ -98,6 +103,60 @@ export class CatalogSellerController {
   @RequirePermissions('catalog.delete')
   deleteProduct(@Param('shopId') shopId: string, @Param('productId') productId: string) {
     return this.products.remove(shopId, productId);
+  }
+
+  // bulk — the spreadsheet route in and out. See `catalog-import.service.ts`
+  // for why the import is a dry run first and all-or-nothing second.
+  @Get('shops/:shopId/products/export')
+  @RequirePermissions('catalog.view')
+  @ApiOperation({
+    summary: 'The whole catalogue as a CSV',
+    description:
+      'One row per variant, product columns repeated, in exactly the shape the import reads — ' +
+      'so export, edit in Excel, import is a round trip rather than two different formats.',
+  })
+  async exportProducts(@Param('shopId') shopId: string, @Res({ passthrough: true }) res: Response) {
+    const csv = await this.importer.exportCsv(shopId);
+    const date = new Date().toISOString().slice(0, 10);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="gopasal-catalogue-${date}.csv"`);
+    res.setHeader('Cache-Control', 'private, no-store, max-age=0');
+    return csv;
+  }
+
+  @Get('shops/:shopId/products/import-template')
+  @RequirePermissions('catalog.import')
+  @ApiOperation({ summary: 'An empty CSV with the headers and one worked example row' })
+  importTemplate(@Res({ passthrough: true }) res: Response) {
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="gopasal-catalogue-template.csv"');
+    return this.importer.template();
+  }
+
+  @Post('shops/:shopId/products/import')
+  @RequirePermissions('catalog.import')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MULTIPART_HARD_LIMIT_BYTES, files: 1 } }))
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['file'],
+      properties: { file: { type: 'string', format: 'binary' } },
+    },
+  })
+  @ApiOperation({
+    summary: 'Import a catalogue CSV',
+    description:
+      'Defaults to a dry run: it reports what would change and what is wrong, and writes ' +
+      'nothing. Pass `mode=apply` to write. One bad row fails the whole file either way — a ' +
+      'half-applied catalogue cannot be undone.',
+  })
+  importProducts(
+    @Param('shopId') shopId: string,
+    @FilePart() file: UploadedFile | undefined,
+    @Query() query: ImportProductsQueryDto,
+  ) {
+    return this.importer.import(shopId, file, { dryRun: query.mode !== 'apply' });
   }
 
   @Post('shops/:shopId/products/:productId/stock')

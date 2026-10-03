@@ -1,0 +1,10 @@
+{
+  "//": "Typechecks the tests, which run in Node rather than in Hermes. The app's own tsconfig excludes this folder, so neither config has to compromise: the app cannot accidentally import a Node API, and the tests get the types they need.",
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["**/*.ts"]
+}

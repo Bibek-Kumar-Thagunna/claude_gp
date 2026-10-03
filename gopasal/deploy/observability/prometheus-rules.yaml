@@ -1,0 +1,116 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: gopasal-alerts
+  namespace: gopasal
+spec:
+  groups:
+    - name: gopasal.availability
+      rules:
+        - alert: GoPasalDeploymentUnavailable
+          expr: kube_deployment_status_replicas_available{namespace=~"gopasal.*"} < kube_deployment_spec_replicas{namespace=~"gopasal.*"}
+          for: 10m
+          labels:
+            severity: page
+          annotations:
+            summary: "Deployment {{ $labels.deployment }} has unavailable replicas"
+            runbook_url: docs/runbooks/on-call.md
+        - alert: GoPasalPodCrashLooping
+          expr: max_over_time(kube_pod_container_status_waiting_reason{namespace=~"gopasal.*",reason="CrashLoopBackOff"}[10m]) >= 1
+          for: 10m
+          labels:
+            severity: page
+          annotations:
+            summary: "Pod {{ $labels.pod }} is crash-looping"
+            runbook_url: docs/runbooks/on-call.md
+        - alert: GoPasalIngressHigh5xx
+          expr: |
+            sum(rate(nginx_ingress_controller_requests{namespace=~"gopasal.*",status=~"5.."}[5m]))
+              /
+            clamp_min(sum(rate(nginx_ingress_controller_requests{namespace=~"gopasal.*"}[5m])), 1) > 0.05
+          for: 10m
+          labels:
+            severity: page
+          annotations:
+            summary: "Ingress 5xx ratio exceeds 5 percent"
+            runbook_url: docs/runbooks/on-call.md
+        - alert: GoPasalIngressLatencyHigh
+          expr: |
+            histogram_quantile(0.95,
+              sum by (le) (rate(nginx_ingress_controller_request_duration_seconds_bucket{namespace=~"gopasal.*"}[10m]))
+            ) > 2
+          for: 15m
+          labels:
+            severity: ticket
+          annotations:
+            summary: "Ingress p95 latency exceeds two seconds"
+            runbook_url: docs/runbooks/on-call.md
+    - name: gopasal.capacity
+      rules:
+        - alert: GoPasalContainerMemoryNearLimit
+          expr: |
+            container_memory_working_set_bytes{namespace=~"gopasal.*",container!=""}
+              / on(namespace,pod,container)
+            kube_pod_container_resource_limits{namespace=~"gopasal.*",resource="memory"} > 0.9
+          for: 15m
+          labels:
+            severity: ticket
+          annotations:
+            summary: "Container {{ $labels.container }} memory exceeds 90 percent of limit"
+            runbook_url: docs/runbooks/on-call.md
+        - alert: GoPasalMigrationJobFailed
+          expr: kube_job_status_failed{namespace=~"gopasal.*",job_name=~"gopasal-migrate.*"} > 0
+          for: 1m
+          labels:
+            severity: page
+          annotations:
+            summary: "Migration job failed"
+            runbook_url: docs/runbooks/migration-failure.md
+    - name: gopasal.api
+      rules:
+        - alert: GoPasalApiHigh5xx
+          expr: |
+            sum(rate(gopasal_http_requests_total{status_code=~"5.."}[5m]))
+              /
+            clamp_min(sum(rate(gopasal_http_requests_total[5m])), 1) > 0.02
+          for: 10m
+          labels:
+            severity: page
+          annotations:
+            summary: "API 5xx ratio exceeds 2 percent"
+            runbook_url: docs/runbooks/on-call.md
+        - alert: GoPasalApiLatencyHigh
+          expr: |
+            histogram_quantile(0.95,
+              sum by (le) (rate(gopasal_http_request_duration_seconds_bucket[10m]))
+            ) > 1.5
+          for: 15m
+          labels:
+            severity: ticket
+          annotations:
+            summary: "API p95 latency exceeds 1.5 seconds"
+            runbook_url: docs/runbooks/on-call.md
+        - alert: GoPasalApiDependencyDown
+          expr: min_over_time(gopasal_dependency_up[5m]) == 0
+          for: 5m
+          labels:
+            severity: page
+          annotations:
+            summary: "API dependency {{ $labels.dependency }} is unavailable"
+            runbook_url: docs/runbooks/on-call.md
+        - alert: GoPasalNotificationQueueBacklog
+          expr: max(gopasal_queue_jobs{queue="notifications",state="waiting"}) > 100
+          for: 10m
+          labels:
+            severity: ticket
+          annotations:
+            summary: "Notification queue has more than 100 waiting jobs"
+            runbook_url: docs/runbooks/on-call.md
+        - alert: GoPasalNotificationJobsFailed
+          expr: max(gopasal_queue_jobs{queue="notifications",state="failed"}) > 0
+          for: 15m
+          labels:
+            severity: ticket
+          annotations:
+            summary: "Notification queue contains failed jobs"
+            runbook_url: docs/runbooks/on-call.md

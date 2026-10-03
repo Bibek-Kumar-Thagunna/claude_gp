@@ -1,0 +1,319 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: gopasal
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_USER: gopasal
+          POSTGRES_PASSWORD: ci-password
+          POSTGRES_DB: gopasal_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gopasal -d gopasal_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      APP_ENV: test
+      NODE_ENV: test
+      DATABASE_URL: postgresql://gopasal:ci-password@127.0.0.1:5432/gopasal_test?schema=public
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: "6379"
+      JWT_ACCESS_SECRET: ci-only-access-secret-at-least-32-characters
+      JWT_REFRESH_SECRET: ci-only-refresh-secret-at-least-32-characters
+      SMS_PROVIDER: log
+      STORAGE_PROVIDER: local
+      MAP_PROVIDER: osm
+      PUSH_PROVIDER: log
+      CORS_ORIGINS: http://localhost:3000
+      NEXT_PUBLIC_API_URL: http://localhost:4000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.7.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.3
+          cache: pnpm
+          cache-dependency-path: gopasal/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Validate Prisma schema
+        run: pnpm --filter @gopasal/api exec prisma validate
+      - name: Apply production migrations
+        run: pnpm --filter @gopasal/api prisma:deploy
+      - name: Test migration clean install and upgrade
+        run: pnpm test:migrations
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+      - name: Verify lifecycle and role boundaries against the real API
+        run: |
+          set -euo pipefail
+          api_log="${RUNNER_TEMP}/gopasal-api.log"
+          api_pid=""
+
+          stop_api() {
+            if [ -n "$api_pid" ]; then
+              kill "$api_pid" >/dev/null 2>&1 || true
+              wait "$api_pid" >/dev/null 2>&1 || true
+              api_pid=""
+            fi
+          }
+
+          start_api() {
+            pnpm --filter @gopasal/api start >>"$api_log" 2>&1 &
+            api_pid=$!
+            for attempt in {1..30}; do
+              if curl --fail --silent --show-error http://127.0.0.1:4000/api/v1/health/ready >/dev/null; then
+                return 0
+              fi
+              if ! kill -0 "$api_pid" >/dev/null 2>&1; then
+                echo "The API exited before becoming ready."
+                return 1
+              fi
+              sleep 1
+            done
+            echo "The API did not become ready within 30 seconds."
+            return 1
+          }
+
+          trap 'stop_api; if [ -s "$api_log" ]; then tail -n 200 "$api_log"; fi' EXIT
+
+          pnpm db:seed
+          start_api
+          pnpm verify:lifecycle
+
+          # The lifecycle intentionally exercises OTP abuse controls. Restarting
+          # the disposable API and clearing only this job's isolated Redis keeps
+          # the independent RBAC proof deterministic without weakening limits.
+          stop_api
+          redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" FLUSHDB >/dev/null
+          pnpm db:seed
+          start_api
+          pnpm verify:auth-rbac
+
+  container-builds:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - surface: api
+            dockerfile: Dockerfile.api
+            buildArgs: ""
+            port: 0
+            smokePath: ""
+          - surface: customer
+            dockerfile: Dockerfile.customer
+            buildArgs: --build-arg NEXT_PUBLIC_API_URL=https://api.ci.gopasal.test --build-arg MAP_PIN_PROVIDER=google
+            port: 3000
+            smokePath: /
+          - surface: seller
+            dockerfile: Dockerfile.seller
+            buildArgs: --build-arg NEXT_PUBLIC_API_URL=https://api.ci.gopasal.test
+            port: 3001
+            smokePath: /login
+          - surface: admin
+            dockerfile: Dockerfile.admin
+            buildArgs: --build-arg NEXT_PUBLIC_API_URL=https://api.ci.gopasal.test --build-arg NEXT_PUBLIC_MAP_TILE_URL=https://tiles.ci.gopasal.test/{z}/{x}/{y}.png
+            port: 3002
+            smokePath: /login
+          - surface: rider
+            dockerfile: Dockerfile.rider
+            buildArgs: --build-arg NEXT_PUBLIC_API_URL=https://api.ci.gopasal.test
+            port: 3003
+            smokePath: /login
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build production ${{ matrix.surface }} image
+        env:
+          DOCKER_BUILDKIT: "1"
+        run: >-
+          docker build
+          ${{ matrix.buildArgs }}
+          --file ${{ matrix.dockerfile }}
+          --tag gopasal/${{ matrix.surface }}:ci
+          .
+      - name: Smoke-test production ${{ matrix.surface }} container
+        if: matrix.port != 0
+        env:
+          SURFACE: ${{ matrix.surface }}
+          PORT: ${{ matrix.port }}
+          SMOKE_PATH: ${{ matrix.smokePath }}
+        run: |
+          set -euo pipefail
+          container="gopasal-${SURFACE}-smoke"
+          trap 'docker logs "$container" 2>/dev/null || true; docker rm -f "$container" >/dev/null 2>&1 || true' EXIT
+          docker run -d --name "$container" -p "127.0.0.1:${PORT}:${PORT}" "gopasal/${SURFACE}:ci"
+          headers="${RUNNER_TEMP}/${SURFACE}-headers.txt"
+          body="${RUNNER_TEMP}/${SURFACE}-body.html"
+          for attempt in {1..20}; do
+            if curl --fail --silent --show-error --dump-header "$headers" --output "$body" "http://127.0.0.1:${PORT}${SMOKE_PATH}"; then
+              grep --quiet --ignore-case '^content-security-policy:' "$headers"
+              grep --quiet --ignore-case '^strict-transport-security:' "$headers"
+              grep --quiet --ignore-case '^x-content-type-options: *nosniff' "$headers"
+              grep --quiet --ignore-case '^x-frame-options: *DENY' "$headers"
+              grep --quiet 'GoPasal' "$body"
+              exit 0
+            fi
+            sleep 1
+          done
+          exit 1
+
+      - name: Smoke-test the API image in production mode
+        if: matrix.surface == 'api'
+        run: |
+          set -euo pipefail
+          project="gopasal-ci-api"
+          network="${project}_default"
+          container="gopasal-api-production-smoke"
+          trap 'docker logs "$container" 2>/dev/null || true; docker rm -f "$container" >/dev/null 2>&1 || true; docker compose --project-name "$project" --profile s3 --profile scan down --volumes >/dev/null 2>&1 || true' EXIT
+
+          docker compose --project-name "$project" --profile s3 --profile scan up -d postgres redis minio clamav
+          docker compose --project-name "$project" --profile s3 run --rm minio-init
+
+          for attempt in {1..120}; do
+            postgres_ready=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' gopasal-postgres 2>/dev/null || true)
+            redis_ready=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' gopasal-redis 2>/dev/null || true)
+            minio_ready=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' gopasal-minio 2>/dev/null || true)
+            if [ "$postgres_ready" = healthy ] && [ "$redis_ready" = healthy ] && [ "$minio_ready" = healthy ]; then
+              break
+            fi
+            sleep 1
+          done
+
+          docker run --rm --network "$network" \
+            -e 'DATABASE_URL=postgresql://gopasal:gopasal_dev_pw@postgres:5432/gopasal?schema=public' \
+            --entrypoint /app/apps/api/node_modules/.bin/prisma \
+            gopasal/api:ci migrate deploy --schema prisma/schema.prisma
+
+          docker run -d --name "$container" --network "$network" \
+            -p 127.0.0.1:4000:4000 -p 127.0.0.1:9464:9464 \
+            -e 'DATABASE_URL=postgresql://gopasal:gopasal_dev_pw@postgres:5432/gopasal?schema=public' \
+            -e REDIS_HOST=redis -e REDIS_PORT=6379 \
+            -e JWT_ACCESS_SECRET=production-smoke-access-secret-at-least-32-characters \
+            -e JWT_REFRESH_SECRET=production-smoke-refresh-secret-different-32-characters \
+            -e PUBLIC_URL=https://api.gopasal.com -e CUSTOMER_WEB_URL=https://gopasal.com \
+            -e CORS_ORIGINS=https://gopasal.com,https://seller.gopasal.com,https://admin.gopasal.com,https://rider.gopasal.com \
+            -e TRUST_PROXY=1 \
+            -e SMS_PROVIDER=sparrow -e SPARROW_SMS_TOKEN=production-smoke-token -e SPARROW_SMS_FROM=GoPasal \
+            -e MAP_PROVIDER=baato -e BAATO_ACCESS_TOKEN=production-smoke-baato-server \
+            -e BAATO_BROWSER_ACCESS_TOKEN=production-smoke-baato-browser \
+            -e MAP_PIN_PROVIDER=google -e MAP_PIN_BROWSER_TOKEN=production-smoke-google-browser \
+            -e STORAGE_PROVIDER=s3 -e S3_ENDPOINT=http://minio:9000 -e S3_BUCKET=gopasal-dev \
+            -e S3_ACCESS_KEY=gopasal_dev -e S3_SECRET_KEY=gopasal_dev_secret -e S3_FORCE_PATH_STYLE=true \
+            -e S3_PUBLIC_BASE_URL=https://assets.gopasal.com \
+            -e MALWARE_SCAN_PROVIDER=clamav -e CLAMAV_HOST=clamav -e CLAMAV_PORT=3310 \
+            -e PUSH_PROVIDER=expo -e EXPO_ACCESS_TOKEN=production-smoke-expo-token \
+            -e SUPPORT_ASSISTANT_PROVIDER=knowledge \
+            gopasal/api:ci
+
+          for attempt in {1..120}; do
+            if health=$(curl --fail --silent --show-error http://127.0.0.1:4000/api/v1/health/ready); then
+              echo "$health" | grep --quiet '"status":"ok"'
+              echo "$health" | grep --quiet '"db":"up"'
+              echo "$health" | grep --quiet '"cache":"up"'
+              echo "$health" | grep --quiet '"scanner":"up"'
+              metrics=$(curl --fail --silent --show-error http://127.0.0.1:9464/metrics)
+              echo "$metrics" | grep --quiet 'gopasal_dependency_up{dependency="postgres".*} 1'
+              echo "$metrics" | grep --quiet 'gopasal_dependency_up{dependency="redis".*} 1'
+              echo "$metrics" | grep --quiet 'gopasal_build_info{node_version="v22.23.3"'
+              exit 0
+            fi
+            if ! docker inspect --format '{{.State.Running}}' "$container" 2>/dev/null | grep --quiet true; then
+              exit 1
+            fi
+            sleep 1
+          done
+          exit 1
+
+  storage-policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.7.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.3
+          cache: pnpm
+          cache-dependency-path: gopasal/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Start private object storage
+        run: |
+          docker compose --profile s3 up -d --wait minio
+          docker compose --profile s3 run --rm minio-init
+      - name: Prove public/private object boundaries
+        env:
+          MINIO_INTEGRATION: "1"
+        run: >-
+          pnpm --filter @gopasal/api exec node
+          --require ts-node/register/transpile-only
+          --test src/providers/storage-policy.integration.spec.ts
+      - name: Stop private object storage
+        if: always()
+        run: docker compose --profile s3 down --volumes
+
+  dependency-audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.7.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.3
+          cache: pnpm
+          cache-dependency-path: gopasal/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Audit production dependencies
+        run: pnpm audit:prod
+
+  secret-scan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan repository history
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

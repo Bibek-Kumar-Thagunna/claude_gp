@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { DeviceTokensService } from './device-tokens.service';
 import { NotificationsService } from './notifications.service';
 import { NotificationsController } from './notifications.controller';
 import { NotificationQueue } from './notification.queue';
@@ -11,7 +12,13 @@ import { NotificationEventsListener } from './notification-events.listener';
  */
 @Module({
   controllers: [NotificationsController],
-  providers: [NotificationsService, NotificationQueue, NotificationWorker, NotificationEventsListener],
-  exports: [NotificationsService, NotificationQueue],
+  providers: [
+    NotificationsService,
+    DeviceTokensService,
+    NotificationQueue,
+    NotificationWorker,
+    NotificationEventsListener,
+  ],
+  exports: [NotificationsService, NotificationQueue, DeviceTokensService],
 })
 export class NotificationsModule {}

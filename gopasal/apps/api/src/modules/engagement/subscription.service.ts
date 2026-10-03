@@ -1,12 +1,10 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
-
-const RENEWAL_DAYS = 30;
 
 /**
  * GoPasal Gold membership. A single subscription per user (model enforces
- * userId unique). Payment capture is a later addition — subscribe activates
- * immediately for now, with a placeholder renewal date so the UI can render it.
+ * userId unique). Activation must be payment-backed; the previous endpoint
+ * granted Gold immediately without collecting or verifying any payment.
  */
 @Injectable()
 export class SubscriptionService {
@@ -22,13 +20,10 @@ export class SubscriptionService {
     return !sub.renewsAt || sub.renewsAt > new Date();
   }
 
-  async subscribe(userId: string, plan = 'gold') {
-    const renewsAt = new Date(Date.now() + RENEWAL_DAYS * 24 * 60 * 60 * 1000);
-    return this.prisma.subscription.upsert({
-      where: { userId },
-      create: { userId, plan, status: 'ACTIVE', renewsAt },
-      update: { plan, status: 'ACTIVE', renewsAt, cancelledAt: null },
-    });
+  subscribe(_userId: string, _plan = 'gold'): Promise<never> {
+    return Promise.reject(new ServiceUnavailableException(
+      'GoPasal Gold enrollment is unavailable until subscription billing and renewal verification are connected.',
+    ));
   }
 
   async cancel(userId: string) {

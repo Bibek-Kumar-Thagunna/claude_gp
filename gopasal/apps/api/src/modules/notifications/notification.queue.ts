@@ -69,6 +69,18 @@ export class NotificationQueue implements OnModuleInit, OnModuleDestroy {
     await Promise.all(jobs.map((j) => this.enqueue(j)));
   }
 
+  /** Bounded label set used by the internal Prometheus collector. */
+  async counts(): Promise<Record<'waiting' | 'active' | 'delayed' | 'failed', number> | null> {
+    if (!this.queue) return null;
+    const counts = await this.queue.getJobCounts('waiting', 'active', 'delayed', 'failed');
+    return {
+      waiting: counts.waiting ?? 0,
+      active: counts.active ?? 0,
+      delayed: counts.delayed ?? 0,
+      failed: counts.failed ?? 0,
+    };
+  }
+
   async onModuleDestroy(): Promise<void> {
     await this.queue?.close();
   }

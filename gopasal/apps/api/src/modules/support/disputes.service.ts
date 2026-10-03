@@ -37,7 +37,7 @@ export class DisputesService {
     return this.prisma.dispute.findMany({
       where: { status },
       orderBy: { createdAt: 'asc' },
-      include: { order: { select: { code: true, total: true, shopId: true, customerId: true } } },
+      include: { order: { select: { code: true, total: true, shopId: true, customerId: true, paymentMethod: true, paymentStatus: true } } },
       take: 200,
     });
   }
@@ -45,10 +45,31 @@ export class DisputesService {
   async get(disputeId: string) {
     const dispute = await this.prisma.dispute.findUnique({
       where: { id: disputeId },
-      include: { order: { include: { shop: { select: { name: true } }, items: true } } },
+      include: {
+        order: {
+          include: {
+            shop: { select: { name: true } },
+            items: true,
+            delivery: { select: { podImageUrl: true, podNote: true, deliveredAt: true } },
+          },
+        },
+      },
     });
     if (!dispute) throw new NotFoundException('Dispute not found');
-    return dispute;
+    const proofKey = dispute.order.delivery?.podImageUrl;
+    return {
+      ...dispute,
+      order: {
+        ...dispute.order,
+        delivery: dispute.order.delivery
+          ? {
+              podNote: dispute.order.delivery.podNote,
+              deliveredAt: dispute.order.delivery.deliveredAt,
+              hasProofPhoto: Boolean(proofKey),
+            }
+          : null,
+      },
+    };
   }
 
   async resolve(adminId: string, disputeId: string, input: { status: DisputeStatus; resolution?: string }) {

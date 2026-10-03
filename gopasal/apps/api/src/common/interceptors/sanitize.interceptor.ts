@@ -44,12 +44,20 @@ export function sanitize(value: unknown, seen = new WeakSet<object>()): unknown 
   if (seen.has(value)) return undefined;
   seen.add(value);
 
-  if (Array.isArray(value)) return value.map((v) => sanitize(v, seen));
+  if (Array.isArray(value)) {
+    const result = value.map((v) => sanitize(v, seen));
+    // `seen` is the active recursion path, not a global visited set. The same
+    // record may legitimately appear twice in one response (for example as
+    // both `current` and the first item in `history`) and must survive both.
+    seen.delete(value);
+    return result;
+  }
 
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
     if (REDACT_KEYS.has(k)) continue;
     out[k] = sanitize(v, seen);
   }
+  seen.delete(value);
   return out;
 }

@@ -193,7 +193,32 @@ async function main() {
     create: { userId: supportAgent.id, roleId: platformRoles.get('Support Agent')! },
     update: { roleId: platformRoles.get('Support Agent')! },
   });
+  // Local configuration starts from immutable version-one records. Runtime
+  // edits append versions; reseeding therefore restores deterministic baselines.
+  for (const environment of ['DEVELOPMENT', 'STAGING', 'PRODUCTION'] as const) {
+    await prisma.platformConfigVersion.upsert({
+      where: { environment_version: { environment, version: 1 } },
+      create: {
+        environment,
+        version: 1,
+        commissionRateBps: 1_000,
+        baseDeliveryFee: 50,
+        perKmDeliveryFee: 15,
+        codLimit: 10_000,
+        refundWindowHours: 72,
+        changeNote:
+          environment === 'DEVELOPMENT'
+            ? 'Seeded local development defaults'
+            : environment === 'STAGING'
+              ? 'Seeded staging finance defaults'
+              : 'Seeded production review baseline',
+        changedById: superAdmin.id,
+      },
+      update: {},
+    });
+  }
   console.log('   • platform staff: Super Admin, Ops Admin, Support Agent');
+  console.log('   • versioned platform configuration baselines');
 
   // ── 4. Categories ────────────────────────────────────────────────────────────
   const categoryDefs = [
@@ -203,6 +228,8 @@ async function main() {
     { slug: 'meat-fish', en: 'Meat & Fish', np: 'मासु र माछा', icon: 'Fish', hue: 'rose', sortOrder: 4 },
     { slug: 'bakery', en: 'Bakery', np: 'बेकरी', icon: 'Croissant', hue: 'orange', sortOrder: 5 },
     { slug: 'electronics', en: 'Electronics', np: 'इलेक्ट्रोनिक्स', icon: 'Smartphone', hue: 'blue', sortOrder: 6 },
+    { slug: 'print-copy', en: 'Print, Copy & Stationery', np: 'प्रिन्ट, फोटोकपी तथा स्टेशनरी', icon: 'Printer', hue: 'violet', sortOrder: 7 },
+    { slug: 'restaurant', en: 'Restaurants & Food', np: 'रेस्टुरेन्ट तथा खाना', icon: 'UtensilsCrossed', hue: 'rose', sortOrder: 8 },
   ];
   const categories = new Map<string, string>(); // slug → id
   for (const c of categoryDefs) {
@@ -212,11 +239,21 @@ async function main() {
   console.log(`   • ${categoryDefs.length} categories`);
 
   // ── 5. Shops (owners, staff, riders, products) ───────────────────────────────
+  // The two approved demo shops represent already-verified sellers. Seed their
+  // location provenance as well as coordinates so the customer visibility gate
+  // exercises the same rule as a real phone capture.
+  const seededLocationCapturedAt = new Date('2026-09-01T04:15:00.000Z');
   // Shop 1 — Namaste Kirana (Baneshwor grocery)
   const bibek = await ensureUser('9811111111', { phone: '9811111111', name: 'Bibek Shrestha', locale: 'np' });
   const namaste = await prisma.shop.upsert({
     where: { slug: 'namaste-kirana' },
-    update: {},
+    update: {
+      locationAccuracyM: 12,
+      locationCapturedAt: seededLocationCapturedAt,
+      locationCaptureMethod: 'HANDOFF',
+      codEnabled: true,
+      onlinePaymentEnabled: true,
+    },
     create: {
       slug: 'namaste-kirana',
       name: 'Namaste Kirana Pasal',
@@ -232,10 +269,15 @@ async function main() {
       fullAddress: 'Baneshwor Chowk, Kathmandu 44600',
       lat: 27.6935,
       lng: 85.342,
+      locationAccuracyM: 12,
+      locationCapturedAt: seededLocationCapturedAt,
+      locationCaptureMethod: 'HANDOFF',
       deliveryRadiusKm: 4,
       hours: '7am – 9pm',
       minOrder: 200,
       emoji: '🛒',
+      codEnabled: true,
+      onlinePaymentEnabled: true,
     },
   });
   const namasteOwnerRole = await ensureRole({
@@ -299,7 +341,11 @@ async function main() {
   const anjana = await ensureUser('9822222221', { phone: '9822222221', name: 'Anjana Maharjan' });
   const everest = await prisma.shop.upsert({
     where: { slug: 'everest-pharmacy' },
-    update: {},
+    update: {
+      locationAccuracyM: 10,
+      locationCapturedAt: seededLocationCapturedAt,
+      locationCaptureMethod: 'DIRECT',
+    },
     create: {
       slug: 'everest-pharmacy',
       name: 'Everest Pharmacy',
@@ -315,6 +361,9 @@ async function main() {
       fullAddress: 'Mangal Bazaar, Patan, Lalitpur 44700',
       lat: 27.6766,
       lng: 85.325,
+      locationAccuracyM: 10,
+      locationCapturedAt: seededLocationCapturedAt,
+      locationCaptureMethod: 'DIRECT',
       deliveryRadiusKm: 5,
       hours: '8am – 10pm',
       minOrder: 100,

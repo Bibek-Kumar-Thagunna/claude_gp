@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { ShopStatus } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { analyticsWindow } from '../analytics/analytics-window';
 
 /**
  * Platform operations: shop approval lifecycle, user management, catalog
@@ -38,24 +39,24 @@ export class AdminService {
     if (shop.status === 'ACTIVE') throw new BadRequestException('Shop is already active');
     return this.prisma.shop.update({
       where: { id: shopId },
-      data: { status: 'ACTIVE', verified: true, approvedAt: new Date() },
+      data: { status: 'ACTIVE', verified: true, approvedAt: new Date(), statusReason: null },
     });
   }
 
-  async rejectShop(shopId: string) {
+  async rejectShop(shopId: string, reason: string) {
     await this.getShop(shopId);
-    return this.prisma.shop.update({ where: { id: shopId }, data: { status: 'REJECTED' } });
+    return this.prisma.shop.update({ where: { id: shopId }, data: { status: 'REJECTED', statusReason: reason.trim() } });
   }
 
-  async suspendShop(shopId: string) {
+  async suspendShop(shopId: string, reason: string) {
     await this.getShop(shopId);
-    return this.prisma.shop.update({ where: { id: shopId }, data: { status: 'SUSPENDED', isOpen: false } });
+    return this.prisma.shop.update({ where: { id: shopId }, data: { status: 'SUSPENDED', isOpen: false, statusReason: reason.trim() } });
   }
 
   async reactivateShop(shopId: string) {
     const shop = await this.getShop(shopId);
     if (shop.status !== 'SUSPENDED') throw new BadRequestException('Only suspended shops can be reactivated');
-    return this.prisma.shop.update({ where: { id: shopId }, data: { status: 'ACTIVE' } });
+    return this.prisma.shop.update({ where: { id: shopId }, data: { status: 'ACTIVE', statusReason: null } });
   }
 
   // ── Users ──────────────────────────────────────────────────────────────
@@ -85,6 +86,22 @@ export class AdminService {
   }
 
   // ── Catalog moderation ───────────────────────────────────────────────────
+  listProducts(q?: string, isActive?: boolean) {
+    return this.prisma.product.findMany({
+      where: {
+        isActive,
+        ...(q ? { OR: [{ name: { contains: q, mode: 'insensitive' } }, { nameNp: { contains: q, mode: 'insensitive' } }, { tags: { has: q } }] } : {}),
+      },
+      orderBy: { updatedAt: 'desc' },
+      include: {
+        shop: { select: { id: true, name: true, status: true } },
+        category: { select: { en: true, np: true } },
+        _count: { select: { variants: true, orderItems: true, reviews: true } },
+      },
+      take: 200,
+    });
+  }
+
   async moderateProduct(productId: string, isActive: boolean) {
     const product = await this.prisma.product.findUnique({ where: { id: productId } });
     if (!product) throw new NotFoundException('Product not found');
@@ -93,14 +110,15 @@ export class AdminService {
 
   // ── Analytics ──────────────────────────────────────────────────────────
   async overview() {
-    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    const [shopsByStatus, ordersByStatus, gmv, users, newUsers, recentOrders, riders] = await Promise.all([
+    const window = analyticsWindow('7d', new Date());
+    const [shopsByStatus, ordersByStatus, gmv, refunds, users, newUsers, recentOrders, riders] = await Promise.all([
       this.prisma.shop.groupBy({ by: ['status'], _count: true }),
       this.prisma.order.groupBy({ by: ['status'], _count: true }),
       this.prisma.order.aggregate({ where: { status: 'DELIVERED' }, _sum: { total: true } }),
+      this.prisma.refund.aggregate({ where: { status: 'COMPLETED' }, _sum: { amount: true } }),
       this.prisma.user.count({ where: { status: 'ACTIVE' } }),
-      this.prisma.user.count({ where: { createdAt: { gte: since } } }),
-      this.prisma.order.count({ where: { createdAt: { gte: since } } }),
+      this.prisma.user.count({ where: { createdAt: { gte: window.from, lt: window.to } } }),
+      this.prisma.order.count({ where: { placedAt: { gte: window.from, lt: window.to } } }),
       this.prisma.rider.count(),
     ]);
 
@@ -109,6 +127,10 @@ export class AdminService {
 
     return {
       gmv: gmv._sum.total ?? 0,
+      gross: gmv._sum.total ?? 0,
+      refunds: refunds._sum.amount ?? 0,
+      net: (gmv._sum.total ?? 0) - (refunds._sum.amount ?? 0),
+      timezone: 'Asia/Kathmandu',
       shops: {
         total: shopsByStatus.reduce((s, x) => s + x._count, 0),
         pending: shopCounts['PENDING'] ?? 0,
@@ -128,15 +150,18 @@ export class AdminService {
 
   /** Simple daily order + GMV series for the dashboard chart (last N days). */
   async ordersTrend(days = 14) {
-    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-    const rows = await this.prisma.$queryRaw<{ day: Date; orders: bigint; gmv: bigint }[]>`
-      SELECT date_trunc('day', "createdAt") AS day,
+    const bounded = Math.min(90, Math.max(1, Math.floor(days)));
+    const since = new Date(Date.now() - bounded * 24 * 60 * 60 * 1000);
+    const rows = await this.prisma.$queryRaw<{ day: Date; orders: bigint; gross: bigint; refunds: bigint }[]>`
+      SELECT date_trunc('day', o."placedAt" AT TIME ZONE 'Asia/Kathmandu') AS day,
              count(*)::bigint AS orders,
-             coalesce(sum(CASE WHEN status = 'DELIVERED' THEN total ELSE 0 END), 0)::bigint AS gmv
-      FROM "Order"
-      WHERE "createdAt" >= ${since}
+             coalesce(sum(CASE WHEN o.status = 'DELIVERED' THEN o.total ELSE 0 END), 0)::bigint AS gross,
+             coalesce(sum(CASE WHEN o.status = 'DELIVERED' THEN r.amount ELSE 0 END), 0)::bigint AS refunds
+      FROM "Order" o
+      LEFT JOIN (SELECT "orderId", sum(amount)::bigint amount FROM "Refund" WHERE status = 'COMPLETED' GROUP BY "orderId") r ON r."orderId" = o.id
+      WHERE o."placedAt" >= ${since}
       GROUP BY 1
       ORDER BY 1 ASC`;
-    return rows.map((r) => ({ day: r.day, orders: Number(r.orders), gmv: Number(r.gmv) }));
+    return rows.map((r) => ({ day: r.day, orders: Number(r.orders), gross: Number(r.gross), refunds: Number(r.refunds), net: Number(r.gross) - Number(r.refunds), gmv: Number(r.gross) }));
   }
 }

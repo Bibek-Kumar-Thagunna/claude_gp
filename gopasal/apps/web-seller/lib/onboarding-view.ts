@@ -29,6 +29,7 @@ const FIELD_LABELS: Record<string, string> = {
   fullAddress: "Full address",
   lat: "Map location",
   lng: "Map location",
+  location: "Verified shop location",
   deliveryRadiusKm: "Delivery coverage",
   hours: "Opening hours",
   soloMode: "Solo mode",
@@ -74,11 +75,21 @@ const DOCUMENT_META: Record<DocumentKind, { label: string; hint: string }> = {
     label: "Bank account proof",
     hint: "A cheque photo, passbook page or statement header showing the account number and name.",
   },
-  PAN_CERTIFICATE: { label: "PAN certificate", hint: "If your business is registered for PAN." },
-  VAT_CERTIFICATE: { label: "VAT certificate", hint: "Only if you are VAT registered." },
+  PAN_CERTIFICATE: {
+    label: "Business PAN certificate",
+    hint: "The IRD certificate showing the PAN entered in your application.",
+  },
+  VAT_CERTIFICATE: {
+    label: "VAT certificate",
+    hint: "Required when you enter a VAT number; otherwise optional.",
+  },
   BUSINESS_LICENCE: {
-    label: "Business registration",
-    hint: "Ward or department registration certificate, if you have one.",
+    label: "Business registration certificate",
+    hint: "Your current company, firm, industry or local business registration certificate.",
+  },
+  REGULATORY_LICENCE: {
+    label: "Sector regulator licence",
+    hint: "Required for regulated categories, such as a DDA pharmacy registration/licence.",
   },
   OWNER_PHOTO: { label: "Photo of the owner", hint: "Helps our team recognise you on a visit." },
   OTHER: { label: "Anything else", hint: "Any other document you think supports your application." },
@@ -98,15 +109,27 @@ export function documentSlot(kind: DocumentKind): DocumentSlot {
  * can see the whole job before starting it, rather than discovering the fourth
  * one only when submit is refused.
  */
-export function requiredDocumentKinds(payoutMethod: PayoutMethod | null): DocumentKind[] {
-  const base: DocumentKind[] = ["CITIZENSHIP_FRONT", "CITIZENSHIP_BACK", "SHOP_PHOTO"];
-  return payoutMethod === "BANK" ? [...base, "BANK_PROOF"] : base;
+export function requiredDocumentKinds(
+  payoutMethod: PayoutMethod | null,
+  vatNo?: string | null,
+  categorySlug?: string | null,
+): DocumentKind[] {
+  const required: DocumentKind[] = [
+    "CITIZENSHIP_FRONT",
+    "CITIZENSHIP_BACK",
+    "BUSINESS_LICENCE",
+    "PAN_CERTIFICATE",
+    "SHOP_PHOTO",
+  ];
+  if (vatNo?.trim()) required.push("VAT_CERTIFICATE");
+  if (categorySlug === "pharmacy") required.push("REGULATORY_LICENCE");
+  if (payoutMethod === "BANK") required.push("BANK_PROOF");
+  return required;
 }
 
 export const OPTIONAL_DOCUMENT_KINDS: DocumentKind[] = [
-  "PAN_CERTIFICATE",
   "VAT_CERTIFICATE",
-  "BUSINESS_LICENCE",
+  "REGULATORY_LICENCE",
   "OWNER_PHOTO",
   "OTHER",
 ];

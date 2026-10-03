@@ -7,19 +7,21 @@
   "license": "UNLICENSED",
   "packageManager": "pnpm@9.7.0",
   "engines": {
-    "node": ">=20.0.0",
+    "node": ">=22.0.0",
     "pnpm": ">=9.0.0"
   },
   "scripts": {
-    "dev": "turbo run dev",
-    "dev:api": "turbo run dev --filter=@gopasal/api",
-    "dev:customer": "turbo run dev --filter=@gopasal/web-customer",
-    "dev:seller": "turbo run dev --filter=@gopasal/web-seller",
-    "dev:admin": "turbo run dev --filter=@gopasal/web-admin",
-    "build": "turbo run build",
-    "lint": "turbo run lint",
-    "typecheck": "turbo run typecheck",
-    "test": "turbo run test",
+    "dev": "APP_ENV=${APP_ENV:-local} turbo run dev",
+    "dev:api": "APP_ENV=${APP_ENV:-local} turbo run dev --filter=@gopasal/api",
+    "dev:customer": "APP_ENV=${APP_ENV:-local} turbo run dev --filter=@gopasal/web-customer",
+    "dev:seller": "APP_ENV=${APP_ENV:-local} turbo run dev --filter=@gopasal/web-seller",
+    "dev:admin": "APP_ENV=${APP_ENV:-local} turbo run dev --filter=@gopasal/web-admin",
+    "dev:rider": "APP_ENV=${APP_ENV:-local} turbo run dev --filter=@gopasal/web-rider",
+    "build": "APP_ENV=${APP_ENV:-local} turbo run build",
+    "lint": "APP_ENV=${APP_ENV:-local} turbo run lint",
+    "typecheck": "APP_ENV=${APP_ENV:-local} turbo run typecheck",
+    "test": "APP_ENV=${APP_ENV:-test} turbo run test",
+    "audit:prod": "pnpm audit --prod --audit-level moderate",
     "clean": "turbo run clean && rm -rf node_modules",
     "db:up": "node scripts/db-ports.mjs check && docker compose up -d",
     "db:down": "docker compose down",
@@ -35,17 +37,40 @@
     "db:seed": "pnpm --filter @gopasal/api db:seed",
     "db:reset": "pnpm --filter @gopasal/api db:reset",
     "db:studio": "pnpm --filter @gopasal/api prisma:studio",
-    "verify:uploads": "node scripts/verify-uploads-e2e.mjs"
+    "verify:uploads": "node scripts/verify-uploads-e2e.mjs",
+    "verify:investor": "node scripts/verify-investor-demo-e2e.mjs",
+    "verify:auth-rbac": "node scripts/verify-auth-rbac.mjs",
+    "test:migrations": "bash scripts/test-migrations.sh",
+    "verify:lifecycle": "node scripts/verify-lifecycle-e2e.mjs",
+    "dev:mobile": "APP_ENV=${APP_ENV:-local} turbo run start --filter=@gopasal/mobile-customer",
+    "mobile:web": "pnpm --filter @gopasal/mobile-customer web",
+    "mobile:export": "pnpm --filter @gopasal/mobile-customer export:web",
+    "dev:seller-app": "APP_ENV=${APP_ENV:-local} turbo run start --filter=@gopasal/mobile-seller",
+    "seller-app:web": "pnpm --filter @gopasal/mobile-seller web",
+    "seller-app:export": "pnpm --filter @gopasal/mobile-seller export:web",
+    "dev:rider-app": "APP_ENV=${APP_ENV:-local} turbo run start --filter=@gopasal/mobile-rider",
+    "rider-app:web": "pnpm --filter @gopasal/mobile-rider web",
+    "rider-app:export": "pnpm --filter @gopasal/mobile-rider export:web",
+    "test:apps": "pnpm --filter @gopasal/mobile-customer test && pnpm --filter @gopasal/mobile-seller test && pnpm --filter @gopasal/mobile-rider test"
   },
   "devDependencies": {
+    "prettier": "^3.3.3",
+    "tsx": "4.20.3",
     "turbo": "^2.1.0",
-    "typescript": "^5.5.4",
-    "prettier": "^3.3.3"
+    "typescript": "^5.5.4"
   },
   "pnpm": {
     "overrides": {
-      "react": "19.0.0-rc-65a56d0e-20241020",
-      "react-dom": "19.0.0-rc-65a56d0e-20241020"
+      "body-parser": "1.20.6",
+      "decode-uri-component": "0.5.0",
+      "file-type": "21.3.2",
+      "js-yaml": "4.3.2",
+      "lodash": "4.18.1",
+      "multer": "2.4.0",
+      "postcss": "8.5.28",
+      "qs": "6.16.0",
+      "sharp": "0.35.4",
+      "uuid@7.0.3": "11.1.1"
     }
   }
 }

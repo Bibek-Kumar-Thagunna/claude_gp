@@ -20,7 +20,7 @@ export default function Error({
   return (
     <div className="grid min-h-[70vh] place-items-center px-6 py-20">
       <div className="max-w-md text-center">
-        <Logo variant="mark" height={56} className="mx-auto" />
+        <div className="flex justify-center"><Logo variant="mark" height={56} /></div>
         <div className="mx-auto mt-8 inline-flex h-16 w-16 items-center justify-center rounded-full bg-crimson-50 text-crimson-600">
           <AlertTriangle className="h-8 w-8" />
         </div>

@@ -32,6 +32,8 @@ import { useDebounced } from "@/lib/use-debounced";
 import { asApiError } from "@/lib/api/client";
 import {
   acceptOrder,
+  dispatchOrder,
+  packOrder,
   listAllShopOrders,
   mergeOrderSummaries,
   rejectOrder,
@@ -351,7 +353,7 @@ function OrdersInner() {
         />
       )}
 
-      <div className="mt-4 space-y-2.5">
+      <div className="mt-4 space-y-3">
         {loading && orders.length === 0 ? (
           <SkeletonRows rows={4} />
         ) : error ? (
@@ -395,6 +397,8 @@ function OrdersInner() {
               busy={acting === o.id}
               canAccept={canInShop(o.shopId, "orders.accept")}
               canReject={canInShop(o.shopId, "orders.reject")}
+              canPack={canInShop(o.shopId, "orders.pack")}
+              canDispatch={canInShop(o.shopId, "orders.dispatch")}
               rejecting={rejecting === o.id}
               reason={reason}
               // The detail endpoint is shop-scoped, so the link carries the shop
@@ -408,6 +412,8 @@ function OrdersInner() {
               }}
               onCancelReject={() => setRejecting(null)}
               onAccept={() => void runAction(o.id, () => acceptOrder(o.shopId, o.id))}
+              onPack={() => void runAction(o.id, () => packOrder(o.shopId, o.id))}
+              onDispatch={() => void runAction(o.id, () => dispatchOrder(o.shopId, o.id))}
               onReject={(r) =>
                 void runAction(o.id, async () => {
                   await rejectOrder(o.shopId, o.id, r);
@@ -431,6 +437,8 @@ type OrderRowProps = {
   busy: boolean;
   canAccept: boolean;
   canReject: boolean;
+  canPack: boolean;
+  canDispatch: boolean;
   rejecting: boolean;
   reason: string;
   onOpen: () => void;
@@ -438,6 +446,8 @@ type OrderRowProps = {
   onStartReject: () => void;
   onCancelReject: () => void;
   onAccept: () => void;
+  onPack: () => void;
+  onDispatch: () => void;
   onReject: (reason: string) => void;
 };
 
@@ -457,6 +467,8 @@ function OrderRow({
   busy,
   canAccept,
   canReject,
+  canPack,
+  canDispatch,
   rejecting,
   reason,
   onOpen,
@@ -464,12 +476,39 @@ function OrderRow({
   onStartReject,
   onCancelReject,
   onAccept,
+  onPack,
+  onDispatch,
   onReject,
 }: OrderRowProps) {
   const actionable = o.status === "PLACED" && (canAccept || canReject);
+  /*
+    The rest of the queue's work, in the queue.
+
+    Accept was the only thing this list could do, so a shop that had accepted
+    ten orders had to open each one to say it was packed — ten navigations to
+    press one button ten times. Pack and dispatch are single, unambiguous
+    transitions with no body, which is exactly what belongs on a row.
+
+    Dispatch needs a rider: the API 400s with "Assign a rider before
+    dispatching", and assigning one is a choice from a list, which does not
+    belong on a row. So the button only appears once a rider is on the order,
+    and the row says to open it otherwise.
+
+    Cancel stays on the detail page on purpose. It needs a typed reason, it is
+    the one transition that cannot be walked back, and a scrolling queue is the
+    worst place to put it within a thumb's reach of Accept.
+  */
+  const canMarkPacked = o.status === "ACCEPTED" && canPack;
+  const canHandOff = o.status === "PACKED" && canDispatch && Boolean(o.rider);
+  const needsRider = o.status === "PACKED" && canDispatch && !o.rider;
 
   return (
-    <Card className="overflow-hidden p-0">
+    <Card
+      className={cn(
+        "overflow-hidden p-0 transition-shadow hover:shadow-md",
+        actionable && "border-l-4 border-l-[#c02636]",
+      )}
+    >
       <div
         role="button"
         tabIndex={0}
@@ -494,10 +533,15 @@ function OrderRow({
             onOpen();
           }
         }}
-        className="flex cursor-pointer flex-col gap-3 p-4 transition-colors hover:bg-ink-50/60 sm:flex-row sm:items-center"
+        className="flex cursor-pointer flex-col gap-4 p-4 transition-colors hover:bg-ink-50/60 sm:p-5 lg:flex-row lg:items-center"
       >
         <div className="flex min-w-0 flex-1 items-start gap-3">
-          <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-crimson-50 text-crimson-600">
+          <span
+            className={cn(
+              "inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl",
+              actionable ? "bg-crimson-600 text-white shadow-sm" : "bg-crimson-50 text-crimson-600",
+            )}
+          >
             <ShoppingBag className="h-5 w-5" />
           </span>
           <div className="min-w-0">
@@ -510,11 +554,17 @@ function OrderRow({
                 </Badge>
               )}
             </div>
-            <p className="mt-0.5 truncate text-sm text-ink-600">
-              {o.recipientName} · {o.itemCount} item{o.itemCount === 1 ? "" : "s"} · {rs(o.total)}
-              <span className="ml-1 text-ink-400">({o.isCod ? "COD" : o.paymentMethodLabel})</span>
-            </p>
-            <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-ink-400">
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-ink-600">
+              <span className="font-medium text-ink-800">{o.recipientName}</span>
+              <span>
+                {o.itemCount} item{o.itemCount === 1 ? "" : "s"}
+              </span>
+              <strong className="text-ink-900">{rs(o.total)}</strong>
+              <span className="rounded-full bg-ink-100 px-2 py-0.5 text-xs font-semibold text-ink-600">
+                {o.isCod ? "Cash on delivery" : o.paymentMethodLabel}
+              </span>
+            </div>
+            <p className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-400">
               {showShop && shopName && (
                 <span className="inline-flex items-center gap-1">
                   <Store className="h-3 w-3" /> {shopName}
@@ -530,16 +580,42 @@ function OrderRow({
           </div>
         </div>
 
-        <div className="flex shrink-0 items-center gap-2" onClick={(e) => e.stopPropagation()}>
-          {actionable && !rejecting ? (
+        <div
+          className="flex w-full shrink-0 items-center gap-2 lg:w-auto"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {canMarkPacked ? (
+            <Button className="flex-1 lg:flex-none" size="sm" onClick={onPack} disabled={busy}>
+              {busy ? <Spinner /> : <PackageCheck className="h-4 w-4" />} Mark packed
+            </Button>
+          ) : canHandOff ? (
+            <Button className="flex-1 lg:flex-none" size="sm" onClick={onDispatch} disabled={busy}>
+              {busy ? <Spinner /> : <Bike className="h-4 w-4" />} Hand to {o.rider?.name}
+            </Button>
+          ) : needsRider ? (
+            <Button className="flex-1 lg:flex-none" variant="outline" size="sm" onClick={onOpen}>
+              <Bike className="h-4 w-4" /> Assign a rider
+            </Button>
+          ) : actionable && !rejecting ? (
             <>
               {canReject && (
-                <Button variant="outline" size="sm" onClick={onStartReject} disabled={busy}>
+                <Button
+                  className="flex-1 lg:flex-none"
+                  variant="outline"
+                  size="sm"
+                  onClick={onStartReject}
+                  disabled={busy}
+                >
                   <X className="h-4 w-4" /> Reject
                 </Button>
               )}
               {canAccept && (
-                <Button size="sm" onClick={onAccept} disabled={busy}>
+                <Button
+                  className="flex-1 lg:flex-none"
+                  size="sm"
+                  onClick={onAccept}
+                  disabled={busy}
+                >
                   {busy ? <Spinner /> : <Check className="h-4 w-4" />} Accept
                 </Button>
               )}

@@ -306,7 +306,7 @@ function NewProductInner() {
               .{" "}
               {result.hidden
                 ? "It’s hidden from your storefront until you switch it on."
-                : "It’s visible to customers now."}
+                : "It’s active in your catalogue. Your shop appears to customers once its verified pin and storefront requirements are complete."}
             </p>
             {result.hiddenRequested && !result.hidden && (
               <InlineError
@@ -745,4 +745,3 @@ function Field({
     </label>
   );
 }
-

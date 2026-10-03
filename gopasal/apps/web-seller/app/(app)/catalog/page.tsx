@@ -415,7 +415,7 @@ function CatalogInner() {
             />
           </Card>
         ) : (
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3 md:grid-cols-2 xl:grid-cols-3">
             {products.map((p) => (
               <ProductCard
                 key={p.id}
@@ -634,7 +634,7 @@ function ProductCard({
   const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
 
   return (
-    <Card className="flex flex-col gap-3 p-4">
+    <Card className="min-w-0 flex flex-col gap-3 p-4">
       <div className="flex items-start gap-3">
         <Thumb product={p} />
         <div className="min-w-0 flex-1">
@@ -817,7 +817,7 @@ function ProductCard({
 
       <div className="mt-auto flex items-center justify-between border-t border-ink-100 pt-3">
         <span className="text-xs text-ink-400">
-          {p.isActive ? "Visible to customers" : "Hidden from your storefront"}
+          {p.isActive ? "Active and eligible for your storefront" : "Hidden from your storefront"}
         </span>
         {canEdit && (
           <Switch
@@ -854,5 +854,3 @@ function SmallField({
     </label>
   );
 }
-
-

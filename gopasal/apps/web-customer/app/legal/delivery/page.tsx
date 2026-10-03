@@ -36,15 +36,15 @@ export default function DeliveryPage() {
             an order will arrive.
           </strong>{" "}
           A shop may deliver within its opening hours, batch nearby orders, or agree a convenient time
-          with you. If timing matters for your order, simply message the shop to confirm before or
-          after ordering.
+          with you. If timing matters for your order, call the shop using its published contact
+          number before or after ordering.
         </p>
       </Section>
 
       <Section id="coverage" title="3. Coverage areas">
         <p>
-          Each shop sets the area it can serve. When you set your location, the Platform shows shops
-          that deliver to your neighbourhood. If a shop you like does not yet serve your area, it may
+          Each shop sets the area it can serve. Check the shop&apos;s delivery area before ordering to make
+          sure it serves your neighbourhood. If a shop you like does not yet serve your area, it may
           in future — coverage grows steadily as more shops join GoPasal across the Kathmandu valley
           and beyond.
         </p>
@@ -65,10 +65,9 @@ export default function DeliveryPage() {
 
       <Section id="coordinate" title="5. Coordinating with the shopkeeper">
         <p>
-          You can contact the shop owner or their staff directly through the Platform to share
-          directions, add a landmark, or agree a delivery time. To protect your privacy, calls and
-          messages are masked or routed through GoPasal where technically possible, so your personal
-          phone number is not exposed unnecessarily.
+          You can call the shop using its published contact number to share directions, add a
+          landmark, or agree a delivery time. Use the GoPasal support-ticket flow if an order issue
+          cannot be resolved directly with the shop.
         </p>
       </Section>
 
@@ -110,7 +109,7 @@ export default function DeliveryPage() {
       <Section id="contact" title="10. Contact us">
         <p>
           Questions about delivery? Email <a href="mailto:hello@gopasal.com">hello@gopasal.com</a> or
-          call <a href="tel:+97716000000">+977 1 6000000</a>.
+          open a ticket in the <a href="/support">Help &amp; Support centre</a>.
         </p>
       </Section>
     </LegalPage>

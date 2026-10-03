@@ -411,6 +411,9 @@ function QueueCard({
             {row.reviewer.name ?? "A reviewer"} has it
           </p>
         )}
+        <span className="mt-3 inline-flex text-xs font-bold text-crimson-600">
+          Review full application →
+        </span>
       </button>
     </li>
   );

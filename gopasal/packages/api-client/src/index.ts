@@ -94,7 +94,13 @@ export function createApiClient(config: {
   storageKey: string;
   surface: AuthSurface;
 }): ApiClient {
-  const session = createSessionStore({ storageKey: config.storageKey });
+  // This package is browser-only. Native apps use @gopasal/native-data and keep
+  // their refresh tokens in the operating system's secure storage instead.
+  const session = createSessionStore({
+    storageKey: config.storageKey,
+    cookieRefresh: true,
+    surface: config.surface,
+  });
   const auth = createAuthClient({
     surface: config.surface,
     authedRequest: session.authedRequest,

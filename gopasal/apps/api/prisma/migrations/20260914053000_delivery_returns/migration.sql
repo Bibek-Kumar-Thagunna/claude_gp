@@ -1,0 +1,7 @@
+ALTER TYPE "DeliveryStatus" ADD VALUE 'RETURNING_TO_SHOP';
+ALTER TYPE "DeliveryStatus" ADD VALUE 'RETURNED_TO_SHOP';
+
+ALTER TABLE "Delivery"
+  ADD COLUMN "returnStartedAt" TIMESTAMP(3),
+  ADD COLUMN "returnedAt" TIMESTAMP(3),
+  ADD COLUMN "returnNote" TEXT;

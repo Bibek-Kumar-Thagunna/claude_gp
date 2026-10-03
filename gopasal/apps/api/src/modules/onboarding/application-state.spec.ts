@@ -15,6 +15,7 @@ import {
   missingDocuments,
   missingForSubmit,
   requiredDocuments,
+  unverifiedDocuments,
   type ApplicationAction,
   type SubmittableApplication,
 } from './application-state';
@@ -126,8 +127,13 @@ function completeApplication(): SubmittableApplication {
     contactPhone: '9800000000',
     area: 'Baneshwor, Kathmandu',
     fullAddress: 'Ward 10, New Baneshwor',
+    lat: 27.6915,
+    lng: 85.3419,
+    locationCapturedAt: new Date('2026-09-09T10:00:00.000Z'),
     ownerName: 'Sita Sharma',
     citizenshipNo: '12-34-56-78901',
+    registrationNo: 'REG-12345',
+    panNo: '123456789',
     payoutMethod: 'BANK',
     bankName: 'Nabil Bank',
     bankAccountNo: '01234567890123',
@@ -150,6 +156,8 @@ describe('missingForSubmit', () => {
       fullAddress: null,
       ownerName: null,
       citizenshipNo: null,
+      registrationNo: null,
+      panNo: null,
       payoutMethod: null,
       bankName: null,
       bankAccountNo: null,
@@ -164,6 +172,8 @@ describe('missingForSubmit', () => {
       'fullAddress',
       'ownerName',
       'citizenshipNo',
+      'registrationNo',
+      'panNo',
       'payoutMethod',
     ]);
   });
@@ -198,17 +208,31 @@ describe('missingForSubmit', () => {
     }
   });
 
-  it('does not require business registration — most Nepali shops are unregistered', () => {
-    // registrationNo / panNo / vatNo are absent from SubmittableApplication on
-    // purpose; this asserts the intent stays intentional.
-    assert.deepEqual(missingForSubmit(completeApplication()), []);
+  it('requires both legal registration and business PAN', () => {
+    assert.deepEqual(
+      missingForSubmit({ ...completeApplication(), registrationNo: null, panNo: ' ' }),
+      ['registrationNo', 'panNo'],
+    );
+  });
+
+  it('allows location to be completed after approval', () => {
+    assert.deepEqual(
+      missingForSubmit({ ...completeApplication(), locationCapturedAt: null, lat: null, lng: null }),
+      [],
+    );
   });
 });
 
 describe('required documents', () => {
-  const KYC = ['CITIZENSHIP_FRONT', 'CITIZENSHIP_BACK', 'SHOP_PHOTO'] as const;
+  const KYC = [
+    'CITIZENSHIP_FRONT',
+    'CITIZENSHIP_BACK',
+    'BUSINESS_LICENCE',
+    'PAN_CERTIFICATE',
+    'SHOP_PHOTO',
+  ] as const;
 
-  it('asks every applicant for both sides of a citizenship card and a shopfront photo', () => {
+  it('asks every applicant for identity, registration, PAN and a shopfront photo', () => {
     assert.deepEqual(requiredDocuments(null), [...KYC]);
   });
 
@@ -218,13 +242,14 @@ describe('required documents', () => {
     assert.deepEqual(requiredDocuments('KHALTI'), [...KYC]);
   });
 
-  it('never requires paperwork an unregistered shop cannot produce', () => {
-    for (const method of [null, 'BANK', 'ESEWA', 'KHALTI'] as const) {
-      const required = requiredDocuments(method);
-      for (const optional of ['PAN_CERTIFICATE', 'VAT_CERTIFICATE', 'BUSINESS_LICENCE'] as const) {
-        assert.ok(!required.includes(optional), `${optional} must stay optional`);
-      }
-    }
+  it('requires VAT proof only when a VAT number is declared', () => {
+    assert.ok(!requiredDocuments('ESEWA').includes('VAT_CERTIFICATE'));
+    assert.ok(requiredDocuments('ESEWA', '123456789').includes('VAT_CERTIFICATE'));
+  });
+
+  it('requires a regulator licence for a pharmacy', () => {
+    assert.ok(requiredDocuments('ESEWA', null, 'pharmacy').includes('REGULATORY_LICENCE'));
+    assert.ok(!requiredDocuments('ESEWA', null, 'grocery').includes('REGULATORY_LICENCE'));
   });
 
   it('reports everything missing when nothing is attached', () => {
@@ -237,6 +262,11 @@ describe('required documents', () => {
   it('is satisfied by an attached document a reviewer has not looked at yet', () => {
     const documents = [...KYC, 'BANK_PROOF' as const].map((kind) => ({ kind, review: 'PENDING' as const }));
     assert.deepEqual(missingDocuments({ payoutMethod: 'BANK', documents }), []);
+    assert.deepEqual(
+      unverifiedDocuments({ payoutMethod: 'BANK', documents }),
+      [...KYC, 'BANK_PROOF'],
+      'pending papers may enter the queue but may not pass approval',
+    );
   });
 
   it('is satisfied by an accepted document, and unaffected by extras', () => {
@@ -267,6 +297,8 @@ describe('required documents', () => {
     const documents = [
       { kind: 'CITIZENSHIP_FRONT' as const, review: 'ACCEPTED' as const },
       { kind: 'CITIZENSHIP_BACK' as const, review: 'ACCEPTED' as const },
+      { kind: 'BUSINESS_LICENCE' as const, review: 'ACCEPTED' as const },
+      { kind: 'PAN_CERTIFICATE' as const, review: 'ACCEPTED' as const },
       { kind: 'SHOP_PHOTO' as const, review: 'REJECTED' as const },
       { kind: 'SHOP_PHOTO' as const, review: 'PENDING' as const },
     ];
@@ -286,6 +318,7 @@ describe('required documents', () => {
       'PAN_CERTIFICATE',
       'VAT_CERTIFICATE',
       'BUSINESS_LICENCE',
+      'REGULATORY_LICENCE',
       'SHOP_PHOTO',
       'OWNER_PHOTO',
       'BANK_PROOF',

@@ -8,11 +8,16 @@
  * as an argument — a sign-in to the admin console stays distinguishable in the
  * session list and the audit trail without the endpoint code existing twice.
  *
- * The OTP code is never in a response; `requestOtp` only reports that a challenge
- * was created, for how long, and whether an SMS was actually delivered. With
- * `SMS_PROVIDER=log` (the local default) `delivered` is false and the code is
- * printed in the API log — the login screen says exactly that rather than
- * implying a text is in flight.
+ * Web sign-in asks the API for cookie mode: the rotating refresh credential is
+ * returned only as an HttpOnly cookie and the response carries a blank token
+ * field for backward-compatible typing. Native transports keep the bearer-token
+ * response and store it in operating-system secure storage.
+ *
+ * Production OTP responses never contain the code. With the explicit local-only
+ * `development + SMS_PROVIDER=log` combination, `requestOtp` also returns the
+ * real expiring code so the login screen can provide a clearly-labelled local
+ * helper. Verification still goes through the normal endpoint and all expiry,
+ * attempt and rate-limit rules still apply.
  */
 
 import { rawRequest, type RequestOptions } from "./http";
@@ -42,7 +47,7 @@ export type AuthClient = {
   verifyOtp: (phone: string, code: string) => Promise<VerifyOtpResult>;
   /** Whoever the access token belongs to, plus their resolved permissions. */
   fetchMe: (signal?: AbortSignal) => Promise<MeResult>;
-  revokeSession: (refreshToken: string) => Promise<{ ok: true }>;
+  revokeSession: (refreshToken?: string) => Promise<{ ok: true }>;
 };
 
 /**
@@ -55,6 +60,10 @@ export function createAuthClient(config: {
   authedRequest: <T>(path: string, options?: RequestOptions) => Promise<T>;
 }): AuthClient {
   const { surface, authedRequest } = config;
+  const cookieAuthHeaders = {
+    "X-GoPasal-Auth-Mode": "cookie",
+    "X-GoPasal-Auth-Surface": surface,
+  } as const;
 
   return {
     requestOtp(phone, purpose = "login") {
@@ -68,6 +77,7 @@ export function createAuthClient(config: {
       return rawRequest<VerifyOtpResult>("/auth/otp/verify", {
         method: "POST",
         body: { phone: normalisePhone(phone), code, purpose: "login", surface },
+        headers: cookieAuthHeaders,
       });
     },
 
@@ -84,7 +94,8 @@ export function createAuthClient(config: {
     revokeSession(refreshToken) {
       return rawRequest<{ ok: true }>("/auth/logout", {
         method: "POST",
-        body: { refreshToken },
+        body: refreshToken ? { refreshToken } : {},
+        headers: cookieAuthHeaders,
       });
     },
   };

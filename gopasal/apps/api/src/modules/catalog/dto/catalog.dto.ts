@@ -6,8 +6,6 @@ import {
   IsBoolean,
   IsIn,
   IsInt,
-  IsLatitude,
-  IsLongitude,
   IsNumber,
   IsOptional,
   IsString,
@@ -75,8 +73,9 @@ export const SHOP_MIN_ORDER_MAX = 2_147_483_647;
  * let `{"name": null}` through to `prisma.shop.update` and turned a bad request
  * into a 500. See `common/dto/optional-field.decorator.ts`. So "leave this alone"
  * is *omit the key*; a nullable text column is cleared with `""`; and
- * `categoryId`, `lat` and `lng` can be changed but not emptied, because no value
- * this body accepts means "unset".
+ * `categoryId` can be changed but not emptied. Coordinates are intentionally
+ * absent: the time-limited phone capture flow is the only seller path that can
+ * replace a shop pin.
  */
 export class UpdateShopDto {
   @ApiPropertyOptional({ example: 'Namaste Kirana Pasal' })
@@ -92,14 +91,6 @@ export class UpdateShopDto {
   @OptionalField() @IsString() @MaxLength(20) phone?: string;
   @OptionalField() @IsString() @MaxLength(160) area?: string;
   @OptionalField() @IsString() @MaxLength(300) fullAddress?: string;
-
-  // `@IsNumber()` before `@IsLatitude()`: on its own, `isLatitude` accepts the
-  // *string* "27.7" ("must be a latitude string or number"), and body coercion is
-  // off by design, so the string would reach `prisma.shop.update` for a `Float?`
-  // column and fail there as a 500. The applicant-facing DTO avoids this with
-  // `@Type(() => Number)`; a PATCH body has no reason to coerce, so it rejects.
-  @OptionalField() @IsNumber() @IsLatitude() lat?: number;
-  @OptionalField() @IsNumber() @IsLongitude() lng?: number;
 
   @ApiPropertyOptional({ minimum: SHOP_RADIUS_MIN_KM, maximum: SHOP_RADIUS_MAX_KM })
   @OptionalField()
@@ -368,4 +359,30 @@ export class ListShopProductsQueryDto extends PaginationDto {
   @IsOptional()
   @IsIn(PRODUCT_SORTS)
   sort?: ProductSort;
+}
+
+/**
+ * `POST …/products/import` — the one knob the route takes.
+ *
+ * A word, not a boolean, and that is not a style choice. Query strings are
+ * validated with `enableImplicitConversion` on, which converts a property
+ * reflected as `boolean` with `!!value` — so `?apply=false` arrives as **true**.
+ * This route can rewrite a whole shelf; a flag whose "off" value means "on" is
+ * the last place to spend that trap. `common/dto/request-validation.spec.ts`
+ * documents it, and the coupon filter avoids it the same way.
+ *
+ * The default is the safe one: a client that forgets the parameter gets a report
+ * and changes nothing.
+ */
+export const IMPORT_MODES = ['check', 'apply'] as const;
+export type ImportMode = (typeof IMPORT_MODES)[number];
+
+export class ImportProductsQueryDto {
+  @ApiPropertyOptional({
+    enum: IMPORT_MODES,
+    description: '`check` (default) reports what would change; `apply` writes it.',
+  })
+  @IsOptional()
+  @IsIn(IMPORT_MODES)
+  mode?: ImportMode;
 }

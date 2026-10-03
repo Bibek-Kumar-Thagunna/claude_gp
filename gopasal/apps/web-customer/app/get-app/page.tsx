@@ -14,32 +14,15 @@ import { Reveal } from "@/components/Reveal";
 
 export const metadata: Metadata = {
   title: "Get the GoPasal app",
-  description:
-    "Order from neighbourhood shops, chat with shopkeepers, and pay on delivery — download the GoPasal app for Android and iOS.",
+  description: "GoPasal mobile availability and the live web shopping experience.",
 };
 
 const FEATURES = [
   { icon: Search, title: "Discover shops nearby", body: "Find verified shops that serve your area." },
-  { icon: MessageCircle, title: "Chat with shopkeepers", body: "Coordinate directly — your number stays protected." },
+  { icon: MessageCircle, title: "Contact shopkeepers", body: "Use each shop's verified contact number when needed." },
   { icon: Bell, title: "Order updates", body: "Get notified as the shop confirms and delivers." },
   { icon: Wallet, title: "Cash on delivery", body: "Pay the shop when your order arrives." },
 ];
-
-function StoreBadge({ label, sub }: { label: string; sub: string }) {
-  return (
-    <a
-      href="#"
-      aria-label={`${sub} ${label}`}
-      className="flex items-center gap-3 rounded-xl border border-ink-200 bg-white px-4 py-2.5 transition hover:border-crimson-300"
-    >
-      <Smartphone className="h-6 w-6 text-ink-800" />
-      <span className="text-left leading-tight">
-        <span className="block text-[10px] text-ink-500">{sub}</span>
-        <span className="block text-sm font-bold text-ink-900">{label}</span>
-      </span>
-    </a>
-  );
-}
 
 export default function GetAppPage() {
   return (
@@ -51,26 +34,25 @@ export default function GetAppPage() {
             <Reveal>
               <div className="max-w-xl">
                 <Badge tone="crimson">
-                  <Smartphone className="h-3.5 w-3.5" /> Android &amp; iOS
+                  <Smartphone className="h-3.5 w-3.5" /> Mobile roadmap
                 </Badge>
                 <h1 className="mt-5 text-4xl font-extrabold text-ink-900 md:text-6xl">
-                  Get the GoPasal app
+                  Mobile apps are not published yet
                 </h1>
                 <p className="mt-5 text-lg leading-relaxed text-ink-600 md:text-xl">
-                  Order faster, track your orders, and chat with shops — all in one place. Buy from
-                  the neighbourhood shops you trust, and pay on delivery.
+                  The complete customer journey is available in the live GoPasal web app today.
+                  Native Android and iOS releases remain a future distribution step.
                 </p>
                 <div className="mt-8 flex flex-wrap gap-3">
-                  <StoreBadge label="Google Play" sub="Get it on" />
-                  <StoreBadge label="App Store" sub="Download on the" />
+                  <a href="/shops" className="rounded-full bg-crimson-500 px-5 py-2.5 text-sm font-semibold text-white">Open the web storefront</a>
                 </div>
-                <p className="mt-3 text-xs text-ink-400">App store links coming soon.</p>
+                <p className="mt-3 text-xs text-ink-500">No app-store listing is represented as live.</p>
               </div>
             </Reveal>
 
             {/* Phone mockup */}
             <Reveal delay={1}>
-              <div className="flex justify-center">
+              <div aria-hidden="true" className="flex justify-center">
                 <div className="relative h-[460px] w-[230px] rounded-[2.75rem] border-[10px] border-ink-900 bg-white shadow-float">
                   <div className="absolute left-1/2 top-3 h-1.5 w-16 -translate-x-1/2 rounded-full bg-ink-200" />
                   <div className="flex h-full flex-col items-center justify-between px-5 py-12">

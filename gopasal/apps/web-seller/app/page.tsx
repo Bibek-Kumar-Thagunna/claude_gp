@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { landingPath, useAuth } from "@/components/auth-provider";
-import { LoadingPanel } from "@/components/states";
+import { ConsoleBoot } from "@/components/states";
 
 /**
  * The entry point decides where this account belongs: the dashboard once a shop
@@ -20,9 +20,5 @@ export default function Home() {
     else if (status === "authenticated" && me) router.replace(landingPath(me));
   }, [status, me, router]);
 
-  return (
-    <div className="mx-auto max-w-xl px-6 py-20">
-      <LoadingPanel label="Opening GoPasal Seller…" />
-    </div>
-  );
+  return <ConsoleBoot label="Opening your seller workspace…" />;
 }

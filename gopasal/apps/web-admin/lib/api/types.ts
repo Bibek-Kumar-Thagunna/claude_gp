@@ -119,6 +119,8 @@ export type ReviewApplication = {
   missing: string[];
   /** Required document kinds absent or rejected. A rejected file counts as absent. */
   missingDocuments: DocumentKind[];
+  /** Required papers that still need an explicit reviewer acceptance. */
+  approvalMissingDocuments: DocumentKind[];
 
   applicant: {
     id: string;
@@ -139,6 +141,9 @@ export type ReviewApplication = {
   fullAddress: string | null;
   lat: number | null;
   lng: number | null;
+  locationAccuracyM: number | null;
+  locationCapturedAt: string | null;
+  locationCaptureMethod: string | null;
   deliveryRadiusKm: number;
   hours: string | null;
   soloMode: boolean;

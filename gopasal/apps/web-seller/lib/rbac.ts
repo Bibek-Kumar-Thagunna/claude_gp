@@ -59,8 +59,13 @@ export type PermissionId =
   // Reviews
   | "reviews.view"
   | "reviews.reply"
+  // Private customer conversations
+  | "messages.view"
+  | "messages.respond"
   // Analytics
   | "analytics.view"
+  // Finance
+  | "finance.view"
   // Team
   | "team.view"
   | "team.invite"
@@ -116,12 +121,7 @@ export const RETIRED_PERMISSIONS: {
   { key: "promos:view", reason: "The API's group is spelled `promotions`.", replacement: "promotions.view" },
   { key: "promos:manage", reason: "The API's group is spelled `promotions`.", replacement: "promotions.manage" },
   { key: "analytics:view", reason: "Renamed to dot notation by the API.", replacement: "analytics.view" },
-  {
-    key: "finance:view",
-    reason:
-      "`finance.view` is a PLATFORM permission only. Seller statements have no shop-scope grant yet — the seller ledger is unbuilt.",
-    replacement: null,
-  },
+  { key: "finance:view", reason: "Renamed to dot notation by the API.", replacement: "finance.view" },
   {
     key: "finance:payout",
     reason: "Payouts are unbuilt; no permission in either scope grants them.",
@@ -273,6 +273,25 @@ export const PERMISSION_GROUPS: PermGroup[] = [
     ],
   },
   {
+    resource: "messages",
+    label: "Messages",
+    labelNp: "सन्देश",
+    description: "Private questions and order conversations with customers.",
+    permissions: [
+      { id: "messages.view", label: "View customer messages", labelNp: "ग्राहक सन्देश हेर्ने", hint: "Read conversations for this shop without exposing private phone numbers." },
+      { id: "messages.respond", label: "Reply to customers", labelNp: "ग्राहकलाई जवाफ दिने", hint: "Reply after a customer starts a pre-order chat, or contact a customer who placed an order." },
+    ],
+  },
+  {
+    resource: "finance",
+    label: "Finance",
+    labelNp: "वित्त",
+    description: "Escrow, COD commission, refunds and seller settlements.",
+    permissions: [
+      { id: "finance.view", label: "View finance & settlements", labelNp: "वित्त हेर्ने", hint: "See money held, ready, due and paid for this shop." },
+    ],
+  },
+  {
     resource: "team",
     label: "Team",
     labelNp: "टोली",
@@ -313,8 +332,6 @@ export const PERMISSION_GROUPS: PermGroup[] = [
  * read from and written to the API (`lib/api/roles.ts`), so a local copy could
  * only ever disagree with the server about what a role grants.
  */
-
-
 
 
 

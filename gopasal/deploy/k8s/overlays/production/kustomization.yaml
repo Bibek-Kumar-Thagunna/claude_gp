@@ -1,0 +1,14 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: gopasal-production
+resources:
+  - ../../base
+nameSuffix: -production
+images:
+  - { name: registry.example.invalid/gopasal/api, newTag: production-replace-me }
+  - { name: registry.example.invalid/gopasal/customer, newTag: production-replace-me }
+  - { name: registry.example.invalid/gopasal/seller, newTag: production-replace-me }
+  - { name: registry.example.invalid/gopasal/admin, newTag: production-replace-me }
+  - { name: registry.example.invalid/gopasal/rider, newTag: production-replace-me }
+patches:
+  - path: environment.yaml

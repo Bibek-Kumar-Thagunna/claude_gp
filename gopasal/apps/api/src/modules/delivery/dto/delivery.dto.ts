@@ -1,7 +1,9 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
-import { DeliveryStatus, RiderStatus, VehicleType } from '@prisma/client';
+import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
+import { Type } from "class-transformer";
+import { DeliveryStatus, RiderStatus, VehicleType } from "@prisma/client";
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
   IsArray,
   IsBoolean,
   IsEnum,
@@ -10,19 +12,38 @@ import {
   IsLongitude,
   IsNumber,
   IsOptional,
+  Matches,
   IsString,
+  Max,
   MaxLength,
   Min,
   MinLength,
   ValidateNested,
-} from 'class-validator';
+} from "class-validator";
+import { PaginationDto } from "../../../common/dto/pagination.dto";
+
+export class DeliveryOrderParamDto {
+  @ApiProperty({ description: "Order id" })
+  @IsString()
+  @Matches(/^[A-Za-z0-9_-]{1,64}$/)
+  orderId!: string;
+}
+
+export class DeliveryShopOrderParamDto extends DeliveryOrderParamDto {
+  @ApiProperty({ description: "Shop id" })
+  @IsString()
+  @Matches(/^[A-Za-z0-9_-]{1,64}$/)
+  shopId!: string;
+}
+
+export class RiderDeliveryHistoryQueryDto extends PaginationDto {}
 
 export class RegisterRiderDto {
-  @ApiProperty({ example: '9812345678' })
+  @ApiProperty({ example: "9812345678" })
   @IsString()
   phone!: string;
 
-  @ApiProperty({ example: 'Ram Bahadur' })
+  @ApiProperty({ example: "Ram Bahadur" })
   @IsString()
   @MinLength(2)
   name!: string;
@@ -72,23 +93,22 @@ export const FAIL_REASON_MAX_LENGTH = 500;
  * So the field is gone rather than tightened, and `forbidNonWhitelisted` now
  * answers 400 to any request that sends it. Restoring it means an upload route
  * that stores the bytes under `private/` (a doorstep photo shows a customer's
- * home, and often the customer) and an authenticated read endpoint for the shop,
- * the customer and platform support — see the Phase 4 note in
- * `modules/uploads/upload-rules.ts`. Until that exists, `podNote` is the proof
- * this platform actually holds, and the seller console says so.
+ * home, and often the customer) and authenticated, audit-logged read endpoints.
+ * Those endpoints now live in `delivery-proof.controller.ts`; this transition
+ * DTO remains intentionally unable to choose or replace their storage key.
  */
 export class DeliveryStatusDto {
   @ApiProperty({ enum: DeliveryStatus })
   @IsEnum(DeliveryStatus)
   status!: DeliveryStatus;
 
-  @ApiPropertyOptional({ description: 'Proof-of-delivery note', maxLength: POD_NOTE_MAX_LENGTH })
+  @ApiPropertyOptional({ description: "Proof-of-delivery note", maxLength: POD_NOTE_MAX_LENGTH })
   @IsOptional()
   @IsString()
   @MaxLength(POD_NOTE_MAX_LENGTH)
   podNote?: string;
 
-  @ApiPropertyOptional({ description: 'COD cash collected?' })
+  @ApiPropertyOptional({ description: "COD cash collected?" })
   @IsOptional()
   @IsBoolean()
   codCollected?: boolean;
@@ -96,8 +116,19 @@ export class DeliveryStatusDto {
   @ApiPropertyOptional({ maxLength: FAIL_REASON_MAX_LENGTH })
   @IsOptional()
   @IsString()
+  @MinLength(3)
   @MaxLength(FAIL_REASON_MAX_LENGTH)
   failReason?: string;
+
+  @ApiPropertyOptional({
+    description: "Factual condition of the parcel received back at the shop",
+    maxLength: FAIL_REASON_MAX_LENGTH,
+  })
+  @IsOptional()
+  @IsString()
+  @MinLength(3)
+  @MaxLength(FAIL_REASON_MAX_LENGTH)
+  returnNote?: string;
 }
 
 export class RiderPingDto {
@@ -111,19 +142,19 @@ export class RiderPingDto {
   @IsLongitude()
   lng!: number;
 
-  @ApiPropertyOptional({ description: 'Bearing in degrees (0–360)' })
+  @ApiPropertyOptional({ description: "Bearing in degrees (0–360)" })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   heading?: number;
 
-  @ApiPropertyOptional({ description: 'Speed in m/s' })
+  @ApiPropertyOptional({ description: "Speed in m/s" })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   speed?: number;
 
-  @ApiPropertyOptional({ description: 'GPS accuracy in metres' })
+  @ApiPropertyOptional({ description: "GPS accuracy in metres" })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
@@ -141,21 +172,25 @@ class LatLngDto {
 }
 
 export class UpsertZoneDto {
-  @ApiProperty({ example: 'Baneshwor ring' })
+  @ApiProperty({ example: "Baneshwor ring" })
   @IsString()
   @MinLength(2)
+  @MaxLength(80)
   name!: string;
 
-  @ApiProperty({ type: [LatLngDto], description: 'Polygon vertices (>= 3)' })
+  @ApiProperty({ type: [LatLngDto], description: "Polygon vertices (>= 3)" })
   @IsArray()
+  @ArrayMinSize(3)
+  @ArrayMaxSize(50)
   @ValidateNested({ each: true })
   @Type(() => LatLngDto)
   polygon!: LatLngDto[];
 
-  @ApiPropertyOptional({ description: 'Flat delivery fee override (NPR) for this zone' })
+  @ApiPropertyOptional({ description: "Flat delivery fee override (NPR) for this zone" })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(0)
+  @Max(100_000)
   feeOverride?: number;
 }

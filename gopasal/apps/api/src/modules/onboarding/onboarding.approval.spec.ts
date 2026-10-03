@@ -45,6 +45,9 @@ interface AppRecord {
   fullAddress: string | null;
   lat: number | null;
   lng: number | null;
+  locationAccuracyM: number | null;
+  locationCapturedAt: Date | null;
+  locationCaptureMethod: string | null;
   deliveryRadiusKm: number;
   hours: string | null;
   soloMode: boolean;
@@ -399,14 +402,17 @@ function submittedApplication(overrides: Partial<AppRecord> = {}): AppRecord {
     fullAddress: 'Ward 10, New Baneshwor',
     lat: 27.6939,
     lng: 85.3395,
+    locationAccuracyM: 12,
+    locationCapturedAt: now,
+    locationCaptureMethod: 'DIRECT',
     deliveryRadiusKm: 2.5,
     hours: '7am – 9pm',
     soloMode: true,
     ownerName: 'Sita Sharma',
     ownerNameNp: 'सीता शर्मा',
     citizenshipNo: '12-34-56-78901',
-    registrationNo: null,
-    panNo: null,
+    registrationNo: 'REG-12345',
+    panNo: '123456789',
     vatNo: null,
     payoutMethod: 'BANK',
     bankName: 'Nabil Bank',
@@ -465,10 +471,12 @@ function document(kind: ShopDocumentKind, overrides: Partial<DocRecord> = {}): D
  */
 function completeDocuments(): DocRecord[] {
   return [
-    document('CITIZENSHIP_FRONT'),
-    document('CITIZENSHIP_BACK'),
-    document('SHOP_PHOTO'),
-    document('BANK_PROOF'),
+    document('CITIZENSHIP_FRONT', { review: 'ACCEPTED' }),
+    document('CITIZENSHIP_BACK', { review: 'ACCEPTED' }),
+    document('BUSINESS_LICENCE', { review: 'ACCEPTED' }),
+    document('PAN_CERTIFICATE', { review: 'ACCEPTED' }),
+    document('SHOP_PHOTO', { review: 'ACCEPTED' }),
+    document('BANK_PROOF', { review: 'ACCEPTED' }),
   ];
 }
 
@@ -596,6 +604,8 @@ describe('approve — preflight refusals', () => {
         assert.deepEqual(missing, [
           'CITIZENSHIP_FRONT',
           'CITIZENSHIP_BACK',
+          'BUSINESS_LICENCE',
+          'PAN_CERTIFICATE',
           'SHOP_PHOTO',
           'BANK_PROOF',
         ]);
@@ -614,6 +624,23 @@ describe('approve — preflight refusals', () => {
         assert.ok(err instanceof BadRequestException);
         const { missingDocuments: missing } = err.getResponse() as { missingDocuments: string[] };
         assert.deepEqual(missing, ['SHOP_PHOTO']);
+        return true;
+      },
+    );
+    assert.equal(h.state.shops.length, 0);
+  });
+
+  it('refuses a required document that is attached but still pending review', async () => {
+    const documents = completeDocuments().map((doc) =>
+      doc.kind === 'PAN_CERTIFICATE' ? { ...doc, review: 'PENDING' as const } : doc,
+    );
+    const h = harness({}, documents);
+    await assert.rejects(
+      () => h.service.approve(REVIEWER, 'app_1', DTO),
+      (err: unknown) => {
+        assert.ok(err instanceof BadRequestException);
+        const body = err.getResponse() as { missingDocuments: string[] };
+        assert.deepEqual(body.missingDocuments, ['PAN_CERTIFICATE']);
         return true;
       },
     );
@@ -752,13 +779,13 @@ describe('approve — provisioning', () => {
     const h = harness();
     const view = await h.service.approve(REVIEWER, 'app_1', DTO);
 
-    assert.equal(view.documents.length, 4);
+    assert.equal(view.documents.length, 6);
     const front = view.documents.find((d) => d.kind === 'CITIZENSHIP_FRONT');
     assert.ok(front);
     assert.equal(front.fileName, 'citizenship_front.jpg');
     assert.equal(front.mimeType, 'image/jpeg');
     assert.equal(front.sizeBytes, 204_800);
-    assert.equal(front.review, 'PENDING');
+    assert.equal(front.review, 'ACCEPTED');
     assert.ok(front.uploadedAt instanceof Date);
     for (const doc of view.documents) {
       assert.equal('storageKey' in doc, false, 'a storage key must never be serialised');
@@ -920,7 +947,4 @@ describe('approve — slug collisions', () => {
     assert.equal(h.approvals.length, 0);
   });
 });
-
-
-
 

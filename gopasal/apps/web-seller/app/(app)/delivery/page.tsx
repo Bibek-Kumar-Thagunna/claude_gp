@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import dynamic from "next/dynamic";
 import {
   AlertTriangle,
   Bike,
@@ -32,6 +33,7 @@ import { DeliveryStatusBadge, OrderStatusBadge } from "@/components/orders/Order
 import { cn } from "@/lib/cn";
 import { rs, num, ago } from "@/lib/format";
 import { asApiError } from "@/lib/api/client";
+import { DeliveryProofPhoto } from "@/components/delivery/DeliveryProofPhoto";
 import { dispatchOrder, listAllShopOrders, listShopOrders } from "@/lib/api/orders";
 import {
   assignRider,
@@ -45,6 +47,7 @@ import {
   unassignRider,
   updateShopZone,
   type DeliveryStatusWire,
+  type LatLngWire,
   type UpsertZoneBody,
   type VehicleTypeWire,
 } from "@/lib/api/delivery";
@@ -65,6 +68,14 @@ import {
   type DeliveryRider,
   type DeliveryZone,
 } from "@/lib/delivery-view";
+
+const ZoneBoundaryMap = dynamic(
+  () => import("@/components/delivery/ZoneBoundaryMap").then((module) => module.ZoneBoundaryMap),
+  {
+    ssr: false,
+    loading: () => <div className="h-[300px] animate-pulse rounded-xl bg-ink-100" />,
+  },
+);
 
 /**
  * The self-delivery board, read from the API.
@@ -119,6 +130,8 @@ type ShopSlice = {
   shopName: string;
   riders: DeliveryRider[];
   zones: DeliveryZone[];
+  shopLocation: LatLngWire | null;
+  deliveryRadiusKm: number;
   /** Whether this account may edit zones here — `settings.manage`, not delivery. */
   canManageZones: boolean;
   canManageRiders: boolean;
@@ -272,6 +285,11 @@ function DeliveryInner() {
             .map((r) => ({
               shopId: r.id,
               shopName: shopById(r.id)?.name ?? "This shop",
+              shopLocation:
+                shopById(r.id)?.lat != null && shopById(r.id)?.lng != null
+                  ? { lat: shopById(r.id)!.lat!, lng: shopById(r.id)!.lng! }
+                  : null,
+              deliveryRadiusKm: shopById(r.id)?.deliveryRadiusKm ?? 3,
               riders: toDeliveryRiders(r.riders ?? []),
               zones: toDeliveryZones(r.zones ?? []),
               canManageZones: canInShop(r.id, "settings.manage"),
@@ -370,6 +388,13 @@ function DeliveryInner() {
           patchDelivery(o.shopId, o.id, {
             status: "FAILED",
             ...(reason.trim() ? { failReason: reason.trim() } : {}),
+          }),
+        ),
+      confirmReturn: (o, returnNote) =>
+        runAction(o.id, () =>
+          patchDelivery(o.shopId, o.id, {
+            status: "RETURNED_TO_SHOP",
+            returnNote: returnNote.trim(),
           }),
         ),
     }),
@@ -594,24 +619,40 @@ function DeliveryInner() {
               message="This shop has more open orders than the board reads at once. The newest are shown — work through them and refresh to pull the rest."
             />
           )}
-          <BoardView board={board} showShop={activeShopId === null} ridersByShop={ridersByShop} acting={acting} handlers={handlers} />
+          <BoardView
+            board={board}
+            showShop={activeShopId === null}
+            ridersByShop={ridersByShop}
+            acting={acting}
+            handlers={handlers}
+          />
         </div>
       ) : tab === "riders" ? (
         <RidersPanel
           slices={slices}
           activeShopId={activeShopId}
           acting={acting}
-          onRegister={(shopId, body) => runAction(`reg:${shopId}`, () => registerRider(shopId, body))}
-          onRemove={(shopId, riderId) => void runAction(`rider:${riderId}`, () => removeRider(shopId, riderId))}
+          onRegister={(shopId, body) =>
+            runAction(`reg:${shopId}`, () => registerRider(shopId, body))
+          }
+          onRemove={(shopId, riderId) =>
+            void runAction(`rider:${riderId}`, () => removeRider(shopId, riderId))
+          }
         />
       ) : (
         <ZonesPanel
           slices={slices}
           activeShopId={activeShopId}
           acting={acting}
-          onCreate={(shopId, body) => runAction(`zone:new:${shopId}`, () => createShopZone(shopId, body))}
-          onUpdate={(shopId, zoneId, body) => runAction(`zone:${zoneId}`, () => updateShopZone(shopId, zoneId, body))}
-          onDelete={(shopId, zoneId) => void runAction(`zone:${zoneId}`, () => deleteShopZone(shopId, zoneId))}
+          onCreate={(shopId, body) =>
+            runAction(`zone:new:${shopId}`, () => createShopZone(shopId, body))
+          }
+          onUpdate={(shopId, zoneId, body) =>
+            runAction(`zone:${zoneId}`, () => updateShopZone(shopId, zoneId, body))
+          }
+          onDelete={(shopId, zoneId) =>
+            void runAction(`zone:${zoneId}`, () => deleteShopZone(shopId, zoneId))
+          }
         />
       )}
     </div>
@@ -634,12 +675,14 @@ type CardHandlers = {
   step: (o: SellerOrder, to: DeliveryStatusWire) => Promise<boolean>;
   finish: (o: SellerOrder, codCollected: boolean, note: string) => Promise<boolean>;
   fail: (o: SellerOrder, reason: string) => Promise<boolean>;
+  confirmReturn: (o: SellerOrder, returnNote: string) => Promise<boolean>;
 };
 
 const LANE_GRID: Record<DeliveryLane, string> = {
   ready: "border-t-[#e2a200]",
   with_rider: "border-t-[#1D4ED8]",
   on_the_way: "border-t-crimson-500",
+  returns: "border-t-[#D97706]",
   closed: "border-t-[#0B7E58]",
 };
 
@@ -671,7 +714,7 @@ function BoardView({
   }
 
   return (
-    <div className="grid gap-4 xl:grid-cols-4">
+    <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-5">
       {DELIVERY_LANES.map((lane) => (
         <section
           key={lane.id}
@@ -752,10 +795,11 @@ function OrderCard({
 }) {
   const { canInShop } = useAuth();
   const { shopById } = useShops();
-  const [panel, setPanel] = React.useState<"none" | "pick" | "finish" | "fail">("none");
+  const [panel, setPanel] = React.useState<"none" | "pick" | "finish" | "fail" | "return">("none");
   const [collected, setCollected] = React.useState(true);
   const [note, setNote] = React.useState("");
   const [reason, setReason] = React.useState("");
+  const [returnNote, setReturnNote] = React.useState("");
 
   const canAssign = canInShop(o.shopId, "delivery.assign");
   const canUpdate = canInShop(o.shopId, "delivery.update");
@@ -797,7 +841,9 @@ function OrderCard({
                 ? `Cash collected · ${rs(o.total)}`
                 : `Collect ${rs(o.total)}`}
           </Badge>
-          {o.rider ? (
+          {o.rider &&
+          !(o.deliveryStatus === "FAILED" && !o.pickedUpAt) &&
+          o.deliveryStatus !== "RETURNED_TO_SHOP" ? (
             <Badge tone="blue">
               <Bike className="h-3 w-3" /> {o.rider.name} · {vehicleLabel(o.rider.vehicleType)}
             </Badge>
@@ -806,23 +852,53 @@ function OrderCard({
           )}
         </div>
 
-        {o.rider && (
-          <a
-            href={`tel:${o.rider.phone}`}
-            className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-ink-500 hover:text-crimson-600"
-          >
-            <Phone className="h-3 w-3" /> {o.rider.phone}
-          </a>
+        {o.rider &&
+          !(o.deliveryStatus === "FAILED" && !o.pickedUpAt) &&
+          o.deliveryStatus !== "RETURNED_TO_SHOP" && (
+            <a
+              href={`tel:${o.rider.phone}`}
+              className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-ink-500 hover:text-crimson-600"
+            >
+              <Phone className="h-3 w-3" /> {o.rider.phone}
+            </a>
+          )}
+
+        {o.deliveryStatus === "FAILED" && (
+          <div className="mt-2 rounded-xl border border-red-100 bg-red-50 p-2.5 text-xs text-red-800">
+            <strong>Previous attempt failed.</strong>{" "}
+            {o.failReason ?? "Review the attempt before assigning another available rider."}
+            <span className="mt-1 block text-red-700">
+              {o.pickedUpAt
+                ? "The rider remains responsible for the parcel until this shop confirms it has returned."
+                : "Nothing was picked up, so another available rider can be assigned."}
+            </span>
+          </div>
+        )}
+
+        {o.deliveryStatus === "RETURNING_TO_SHOP" && (
+          <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-900">
+            <strong>Parcel returning to the shop.</strong> Confirm receipt only after checking the
+            physical parcel and recording its condition.
+          </div>
+        )}
+
+        {o.deliveryStatus === "RETURNED_TO_SHOP" && (
+          <div className="mt-2 rounded-xl border border-blue-100 bg-blue-50 p-2.5 text-xs text-blue-900">
+            <strong>Parcel received back.</strong>{" "}
+            {o.returnNote ?? "The shop confirmed the return."}
+            <span className="mt-1 block text-blue-800">
+              Assign redelivery or cancel the order with a reason.
+            </span>
+          </div>
         )}
 
         {lane === "closed" ? (
-          <p className="mt-2 text-xs text-ink-500">
-            {o.deliveryStatus === "FAILED"
-              ? "This leg failed and cannot be reassigned — the delivery machine has no way back out of FAILED. Cancel or re-place the order instead."
-              : o.deliveredAt
-                ? `Handed over ${ago(o.deliveredAt)}`
-                : "Closed"}
-          </p>
+          <>
+            <p className="mt-2 text-xs text-ink-500">
+              {o.deliveredAt ? `Handed over ${ago(o.deliveredAt)}` : "Closed"}
+            </p>
+            {o.hasProofPhoto && <DeliveryProofPhoto shopId={o.shopId} orderId={o.id} />}
+          </>
         ) : (
           <div className="mt-2.5 flex flex-wrap gap-1.5">
             {lane === "ready" && canAssign && o.actions.assignRider && (
@@ -832,19 +908,44 @@ function OrderCard({
                 onClick={() => setPanel(panel === "pick" ? "none" : "pick")}
                 disabled={busy}
               >
-                <UserPlus className="h-4 w-4" /> Assign rider
+                <UserPlus className="h-4 w-4" />
+                {o.deliveryStatus === "RETURNED_TO_SHOP"
+                  ? "Assign redelivery"
+                  : o.deliveryStatus === "FAILED"
+                    ? "Assign reattempt"
+                    : "Assign rider"}
               </Button>
             )}
 
             {canAssign && o.actions.unassignRider && (
-              <Button size="sm" variant="ghost" onClick={() => handlers.unassign(o)} disabled={busy}>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => handlers.unassign(o)}
+                disabled={busy}
+              >
                 {busy ? <Spinner /> : <X className="h-4 w-4" />} Take off
               </Button>
             )}
 
-            {canUpdate && next && next !== "DELIVERED" && (
-              <Button size="sm" variant="outline" onClick={() => handlers.step(o, next)} disabled={busy}>
+            {canUpdate && next && next !== "DELIVERED" && next !== "RETURNED_TO_SHOP" && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => handlers.step(o, next)}
+                disabled={busy}
+              >
                 {busy ? <Spinner /> : <Check className="h-4 w-4" />} {deliveryStepLabel(next)}
+              </Button>
+            )}
+
+            {canUpdate && next === "RETURNED_TO_SHOP" && (
+              <Button
+                size="sm"
+                onClick={() => setPanel(panel === "return" ? "none" : "return")}
+                disabled={busy}
+              >
+                <PackageCheck className="h-4 w-4" /> Confirm returned
               </Button>
             )}
 
@@ -855,7 +956,11 @@ function OrderCard({
             )}
 
             {canUpdate && next === "DELIVERED" && (
-              <Button size="sm" onClick={() => setPanel(panel === "finish" ? "none" : "finish")} disabled={busy}>
+              <Button
+                size="sm"
+                onClick={() => setPanel(panel === "finish" ? "none" : "finish")}
+                disabled={busy}
+              >
                 <PackageCheck className="h-4 w-4" /> Handed over
               </Button>
             )}
@@ -902,7 +1007,7 @@ function OrderCard({
                   <li key={r.id}>
                     <button
                       type="button"
-                      disabled={busy}
+                      disabled={busy || r.status !== "ONLINE" || r.busy}
                       onClick={async () => {
                         // The list closes only once the assignment is the server's
                         // opinion too. A 403 from a rider another shop owns, or a
@@ -926,10 +1031,8 @@ function OrderCard({
                   </li>
                 ))}
               </ul>
-              {/* Reported by the rider's own app; a shop cannot set it, so an
-                  OFFLINE rider is still assignable and the API will accept it. */}
               <p className="mt-1.5 text-xs text-ink-400">
-                Status comes from the rider’s own app. You can still assign someone who is offline.
+                Only riders who are online and not carrying another order can be assigned.
               </p>
             </>
           )}
@@ -955,17 +1058,9 @@ function OrderCard({
             placeholder="Note for your records — who received it, where it was left"
             className="mt-2 w-full rounded-xl border border-ink-200 px-3 py-2 text-sm outline-none focus:border-crimson-300"
           />
-          {/*
-            No file picker here on purpose, and no photo field on the body either:
-            `DeliveryStatusDto` accepts `status`, `podNote`, `codCollected` and
-            `failReason`, and `forbidNonWhitelisted` answers 400 to anything else. The
-            uploads module was built for onboarding documents and has no delivery
-            route, so there is nowhere for a photo to go. A picker that dropped the
-            photo would be worse than saying so.
-          */}
           <p className="mt-1.5 text-xs text-ink-400">
-            Photo proof isn’t available yet — there’s no upload for delivery photos. Your note is
-            saved with the delivery.
+            The assigned rider can add a consented proof photo from the Rider console before
+            handover. Your note is saved with the delivery either way.
           </p>
           <div className="mt-2 flex gap-2">
             <Button size="sm" variant="ghost" onClick={() => setPanel("none")} disabled={busy}>
@@ -979,9 +1074,43 @@ function OrderCard({
                 // seller typed about a handover that never got recorded.
                 if (await handlers.finish(o, collected, note)) setPanel("none");
               }}
-              disabled={busy}
+              disabled={busy || note.trim().length < 3 || (o.isCod && !collected)}
             >
               {busy ? <Spinner /> : <PackageCheck className="h-4 w-4" />} Confirm handover
+            </Button>
+          </div>
+          <p className="mt-2 text-xs text-ink-400">A factual handover note is required.</p>
+        </div>
+      )}
+
+      {panel === "return" && (
+        <div className="border-t border-amber-100 bg-amber-50/70 p-3">
+          <p className="text-xs font-semibold text-amber-900">
+            Confirm the parcel is physically back
+          </p>
+          <p className="mt-1 text-xs text-amber-800">
+            Check sealed items, damage and temperature-sensitive goods before releasing the rider.
+          </p>
+          <textarea
+            value={returnNote}
+            onChange={(event) => setReturnNote(event.target.value)}
+            rows={2}
+            maxLength={500}
+            placeholder="e.g. All 3 items returned sealed and undamaged"
+            className="mt-2 w-full rounded-xl border border-amber-200 bg-white p-2.5 text-sm outline-none focus:border-amber-400"
+          />
+          <div className="mt-2 flex justify-end gap-2">
+            <Button size="sm" variant="ghost" onClick={() => setPanel("none")} disabled={busy}>
+              Not received yet
+            </Button>
+            <Button
+              size="sm"
+              disabled={busy || returnNote.trim().length < 3}
+              onClick={async () => {
+                if (await handlers.confirmReturn(o, returnNote)) setPanel("none");
+              }}
+            >
+              {busy ? <Spinner /> : <PackageCheck className="h-4 w-4" />} Confirm receipt
             </Button>
           </div>
         </div>
@@ -998,8 +1127,6 @@ function OrderCard({
                 key={r}
                 type="button"
                 onClick={() => setReason(r)}
-                // FAILED is terminal, so the chosen reason is the last editable thing
-                // about this delivery. It was crimson fill alone.
                 aria-pressed={reason === r}
                 className={cn(
                   "rounded-lg px-2.5 py-1 text-xs font-medium ring-1 transition-colors",
@@ -1020,7 +1147,7 @@ function OrderCard({
             className="mt-2 h-10 w-full rounded-xl border border-ink-200 px-3 text-sm outline-none focus:border-crimson-300"
           />
           <p className="mt-1.5 text-xs text-ink-400">
-            A failed leg is final — it can’t be reassigned to another rider.
+            Record the facts now. The shop can assign a fresh delivery attempt afterward.
           </p>
           <div className="mt-2 flex gap-2">
             <Button size="sm" variant="ghost" onClick={() => setPanel("none")} disabled={busy}>
@@ -1031,8 +1158,6 @@ function OrderCard({
               variant="danger"
               disabled={busy || reason.trim().length === 0}
               onClick={async () => {
-                // FAILED is terminal, so this is the one write a seller most needs to
-                // see refused. The reason stays on screen until the server has it.
                 if (await handlers.fail(o, reason)) setPanel("none");
               }}
             >
@@ -1097,8 +1222,8 @@ function RidersPanel({
 
           {s.riders.length === 0 ? (
             <p className="mt-3 rounded-xl border border-dashed border-ink-200 px-4 py-8 text-center text-sm text-ink-500">
-              Nobody on this shop’s roster yet. Add the person who will carry the orders — they get a
-              GoPasal account on their phone number.
+              Nobody on this shop’s roster yet. Add the person who will carry the orders — they get
+              a GoPasal account on their phone number.
             </p>
           ) : (
             <ul className="mt-3 divide-y divide-ink-100">
@@ -1165,7 +1290,9 @@ function RiderRow({
             {r.phone}
           </a>
           <span>
-            {r.busy ? `Carrying ${num(r.activeDeliveries)} order${r.activeDeliveries === 1 ? "" : "s"}` : "Free"}
+            {r.busy
+              ? `Carrying ${num(r.activeDeliveries)} order${r.activeDeliveries === 1 ? "" : "s"}`
+              : "Free"}
           </span>
           {/* "Has ever reported a position" — not a location, and not a claim
               about where they are now. The live feed is on the order detail. */}
@@ -1355,7 +1482,9 @@ function ZonesPanel({
             <h2 className="text-sm font-bold text-ink-900">
               {slices.length > 1 ? s.shopName : "Delivery zones"}
             </h2>
-            <Badge tone="ink">{num(s.zones.length)} zone{s.zones.length === 1 ? "" : "s"}</Badge>
+            <Badge tone="ink">
+              {num(s.zones.length)} zone{s.zones.length === 1 ? "" : "s"}
+            </Badge>
           </div>
           <p className="mt-1 text-xs text-ink-400">
             An area you deliver to, with its own delivery fee if you want one. Orders outside every
@@ -1372,6 +1501,8 @@ function ZonesPanel({
                 <ZoneRow
                   key={z.id}
                   zone={z}
+                  shopLocation={s.shopLocation}
+                  deliveryRadiusKm={s.deliveryRadiusKm}
                   canManage={s.canManageZones}
                   busy={acting === `zone:${z.id}`}
                   onSave={(body) => onUpdate(s.shopId, z.id, body)}
@@ -1383,6 +1514,8 @@ function ZonesPanel({
 
           {activeShopId !== null && s.canManageZones && (
             <NewZoneForm
+              shopLocation={s.shopLocation}
+              deliveryRadiusKm={s.deliveryRadiusKm}
               busy={acting === `zone:new:${s.shopId}`}
               onCreate={(body) => onCreate(s.shopId, body)}
             />
@@ -1420,6 +1553,8 @@ function ZoneFields({
   initialName,
   initialFee,
   initialPolygon,
+  shopLocation,
+  deliveryRadiusKm,
   submitLabel,
   busy,
   onSubmit,
@@ -1428,6 +1563,8 @@ function ZoneFields({
   initialName: string;
   initialFee: string;
   initialPolygon: string;
+  shopLocation: LatLngWire | null;
+  deliveryRadiusKm: number;
   submitLabel: string;
   busy: boolean;
   onSubmit: (body: UpsertZoneBody) => void;
@@ -1440,8 +1577,9 @@ function ZoneFields({
   const parsed = React.useMemo(() => parsePolygonText(text), [text]);
   const feeTrimmed = fee.trim();
   const feeNumber = feeTrimmed === "" ? null : Number(feeTrimmed);
-  const feeOk = feeNumber === null || (Number.isInteger(feeNumber) && feeNumber >= 0);
-  const nameOk = name.trim().length >= 2;
+  const feeOk =
+    feeNumber === null || (Number.isInteger(feeNumber) && feeNumber >= 0 && feeNumber <= 100_000);
+  const nameOk = name.trim().length >= 2 && name.trim().length <= 80;
   const ready = nameOk && feeOk && parsed.error === null;
 
   return (
@@ -1452,6 +1590,7 @@ function ZoneFields({
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
+            maxLength={80}
             placeholder="New Baneshwor"
             className="h-10 w-full rounded-xl border border-ink-200 px-3 text-sm outline-none focus:border-crimson-300"
           />
@@ -1470,6 +1609,38 @@ function ZoneFields({
         </label>
       </div>
 
+      <div className="mt-3">
+        <ZoneBoundaryMap
+          points={parsed.points}
+          shopLocation={shopLocation}
+          deliveryRadiusKm={deliveryRadiusKm}
+          onChange={(next) => setText(polygonToText(next))}
+        />
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs text-ink-500">
+            Click the map to add corners in order. Drag a red marker to adjust the boundary.
+          </p>
+          <div className="flex gap-1.5">
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={parsed.points.length === 0}
+              onClick={() => setText(polygonToText(parsed.points.slice(0, -1)))}
+            >
+              Undo point
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={parsed.points.length === 0}
+              onClick={() => setText("")}
+            >
+              Clear
+            </Button>
+          </div>
+        </div>
+      </div>
+
       <label className="mt-2 block">
         <span className="mb-1 block text-xs font-semibold text-ink-600">
           Boundary — one point per line, as “latitude, longitude”
@@ -1483,23 +1654,22 @@ function ZoneFields({
           className="w-full rounded-xl border border-ink-200 px-3 py-2 font-mono text-xs outline-none focus:border-crimson-300"
         />
       </label>
-      {/* No map, and no pretence of one. The console has no map surface yet, so a
-          boundary is typed in the shape the endpoint actually takes. */}
       <p className="mt-1 text-xs text-ink-400">
-        At least 3 points. There’s no map to draw on yet — take the corners from your phone’s map
-        app and paste them here.
+        At least 3 and at most 50 points. Coordinates remain editable for precise corrections or
+        importing a boundary from another map.
       </p>
 
       {parsed.error && text.trim().length > 0 && (
         <InlineError message={parsed.error} className="mt-2" />
       )}
       {!feeOk && (
-        <InlineError message="A delivery fee must be a whole number of rupees, or empty." className="mt-2" />
+        <InlineError
+          message="A delivery fee must be a whole number from रु 0 to रु 100,000, or empty."
+          className="mt-2"
+        />
       )}
       {parsed.error === null && (
-        <p className="mt-2 text-xs text-ink-500">
-          {num(parsed.points.length)} points read.
-        </p>
+        <p className="mt-2 text-xs text-ink-500">{num(parsed.points.length)} points read.</p>
       )}
 
       <div className="mt-2.5 flex flex-wrap gap-2">
@@ -1526,12 +1696,16 @@ function ZoneFields({
 
 function ZoneRow({
   zone: z,
+  shopLocation,
+  deliveryRadiusKm,
   canManage,
   busy,
   onSave,
   onDelete,
 }: {
   zone: DeliveryZone;
+  shopLocation: LatLngWire | null;
+  deliveryRadiusKm: number;
   canManage: boolean;
   busy: boolean;
   onSave: (body: UpsertZoneBody) => Promise<boolean>;
@@ -1555,6 +1729,8 @@ function ZoneRow({
           initialName={z.name}
           initialFee={z.feeOverride === null ? "" : String(z.feeOverride)}
           initialPolygon={polygonToText(z.points)}
+          shopLocation={shopLocation}
+          deliveryRadiusKm={deliveryRadiusKm}
           submitLabel="Save zone"
           busy={busy}
           onSubmit={async (body) => {
@@ -1602,7 +1778,12 @@ function ZoneRow({
               <Button size="sm" variant="danger" onClick={onDelete} disabled={busy}>
                 {busy ? <Spinner /> : <Trash2 className="h-4 w-4" />} Delete for good
               </Button>
-              <Button size="sm" variant="ghost" onClick={() => setConfirming(false)} disabled={busy}>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setConfirming(false)}
+                disabled={busy}
+              >
                 Keep
               </Button>
             </>
@@ -1619,9 +1800,13 @@ function ZoneRow({
 
 function NewZoneForm({
   busy,
+  shopLocation,
+  deliveryRadiusKm,
   onCreate,
 }: {
   busy: boolean;
+  shopLocation: LatLngWire | null;
+  deliveryRadiusKm: number;
   onCreate: (body: UpsertZoneBody) => Promise<boolean>;
 }) {
   const [open, setOpen] = React.useState(false);
@@ -1642,6 +1827,8 @@ function NewZoneForm({
         initialName=""
         initialFee=""
         initialPolygon=""
+        shopLocation={shopLocation}
+        deliveryRadiusKm={deliveryRadiusKm}
         submitLabel="Create zone"
         busy={busy}
         onSubmit={async (body) => {

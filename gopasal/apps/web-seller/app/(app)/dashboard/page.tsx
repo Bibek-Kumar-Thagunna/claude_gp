@@ -185,8 +185,8 @@ export default function DashboardPage() {
             </Reveal>
           </div>
 
-          <div className="mt-4 grid gap-4 lg:grid-cols-3">
-            <Card className="p-5 lg:col-span-2">
+          <div className="mt-4 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-3">
+            <Card className="min-w-0 p-5 lg:col-span-2">
               <div className="mb-4 flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <h2 className="text-lg font-semibold text-ink-900">Sales trend</h2>
@@ -207,7 +207,7 @@ export default function DashboardPage() {
               and there is no accept-by countdown: no order, event or delivery row
               records a deadline, so a timer here would be a promise nobody made.
             */}
-            <Card className="flex flex-col p-5">
+            <Card className="min-w-0 flex flex-col p-5">
               <div className="mb-3 flex items-center justify-between">
                 <h2 className="text-lg font-semibold text-ink-900">Open right now</h2>
                 {open && open.total > 0 && <Badge tone="marigold">{num(open.total)}</Badge>}
@@ -236,8 +236,8 @@ export default function DashboardPage() {
             </Card>
           </div>
 
-          <div className="mt-4 grid gap-4 lg:grid-cols-3">
-            <Card className="p-5 lg:col-span-2">
+          <div className="mt-4 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-3">
+            <Card className="min-w-0 p-5 lg:col-span-2">
               <h2 className="mb-4 text-lg font-semibold text-ink-900">Top products</h2>
               {data.topProducts.length === 0 ? (
                 <p className="py-6 text-center text-sm text-ink-400">
@@ -280,7 +280,7 @@ export default function DashboardPage() {
               nothing that says "low", so the rows here are out-of-stock counts plus the
               honest counterweight: how many products GoPasal holds no stock opinion on.
             */}
-            <Card className="p-5">
+            <Card className="min-w-0 p-5">
               <div className="mb-3 flex items-center justify-between">
                 <h2 className="text-lg font-semibold text-ink-900">Stock</h2>
                 {warnings.length > 0 && (

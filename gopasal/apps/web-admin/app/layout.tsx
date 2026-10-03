@@ -1,28 +1,8 @@
 import type { Metadata, Viewport } from "next";
-import { Baloo_2, Inter, Hind } from "next/font/google";
 import "./globals.css";
 import { AdminProvider } from "@/components/providers";
 import { AuthProvider } from "@/components/auth-provider";
-import { Splash } from "@/components/Splash";
 import { OfflineWatcher } from "@/components/OfflineWatcher";
-
-const display = Baloo_2({
-  subsets: ["latin"],
-  weight: ["500", "600", "700", "800"],
-  variable: "--font-display",
-  display: "swap",
-});
-const body = Inter({
-  subsets: ["latin"],
-  variable: "--font-body",
-  display: "swap",
-});
-const deva = Hind({
-  subsets: ["devanagari"],
-  weight: ["400", "500", "600", "700"],
-  variable: "--font-devanagari",
-  display: "swap",
-});
 
 export const metadata: Metadata = {
   title: {
@@ -45,9 +25,8 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${display.variable} ${body.variable} ${deva.variable}`}>
+    <html lang="en">
       <body>
-        <Splash />
         {/* AuthProvider is outside AdminProvider because AdminProvider's `can`
             now delegates to it: real permissions from `GET /auth/me` decide what
             the console offers, not a local role fixture. */}

@@ -1,0 +1,101 @@
+name: Publish Windows tester images
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: windows-tester-images
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - surface: api
+            dockerfile: Dockerfile.api
+            build_args: |
+              APP_ENV=local
+          - surface: customer
+            dockerfile: Dockerfile.customer
+            build_args: |
+              APP_ENV=local
+              NEXT_PUBLIC_API_URL=http://localhost:4000
+              NEXT_PUBLIC_SITE_URL=http://localhost:3000
+              NEXT_PUBLIC_SELLER_URL=http://localhost:3001
+              MAP_PIN_PROVIDER=osm
+          - surface: seller
+            dockerfile: Dockerfile.seller
+            build_args: |
+              APP_ENV=local
+              NEXT_PUBLIC_API_URL=http://localhost:4000
+              NEXT_PUBLIC_SELLER_PUBLIC_URL=http://localhost:3001
+          - surface: admin
+            dockerfile: Dockerfile.admin
+            build_args: |
+              APP_ENV=local
+              NEXT_PUBLIC_API_URL=http://localhost:4000
+          - surface: rider
+            dockerfile: Dockerfile.rider
+            build_args: |
+              APP_ENV=local
+              NEXT_PUBLIC_API_URL=http://localhost:4000
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./gopasal
+          file: ./gopasal/${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          push: true
+          build-args: ${{ matrix.build_args }}
+          tags: |
+            ghcr.io/bibek-kumar-thagunna/gopasal-tester-${{ matrix.surface }}:latest
+            ghcr.io/bibek-kumar-thagunna/gopasal-tester-${{ matrix.surface }}:${{ github.event.workflow_run.head_sha || github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.event.workflow_run.head_sha || github.sha }}
+            org.opencontainers.image.title=GoPasal tester ${{ matrix.surface }}
+          cache-from: type=gha,scope=tester-${{ matrix.surface }}
+          cache-to: type=gha,mode=max,scope=tester-${{ matrix.surface }}
+
+  bundle:
+    needs: publish
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - name: Package the non-technical Windows launcher
+        run: >-
+          cd gopasal/deploy &&
+          zip -r "${RUNNER_TEMP}/GoPasal-Tester-Windows.zip" windows-tester
+          -x 'windows-tester/.env' 'windows-tester/.state/*' 'windows-tester/exports/*'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GoPasal-Tester-Windows
+          path: ${{ runner.temp }}/GoPasal-Tester-Windows.zip
+          if-no-files-found: error
+          retention-days: 30

@@ -6,7 +6,7 @@ export default function NotFound() {
   return (
     <div className="grid min-h-[70vh] place-items-center px-6 py-20">
       <div className="max-w-md text-center">
-        <Logo variant="mark" height={56} className="mx-auto" />
+        <div className="flex justify-center"><Logo variant="mark" height={56} /></div>
         <p className="mt-8 font-display text-7xl font-extrabold text-crimson-500">404</p>
         <h1 className="mt-2 text-2xl font-bold text-ink-900">This shop shelf is empty</h1>
         <p className="mt-3 text-ink-600">

@@ -187,6 +187,9 @@ export async function rawRequest<T>(path: string, options: RequestOptions = {}):
       body: payload,
       signal: options.signal,
       cache: "no-store",
+      // Browser refresh tokens are host-only HttpOnly cookies. Native clients
+      // use a separate transport and continue to send refresh tokens directly.
+      credentials: "include",
     });
   } catch (err) {
     // An aborted request is the caller unmounting, not a failure to report.
@@ -252,6 +255,7 @@ export async function rawBlobRequest(path: string, options: RequestOptions = {})
       headers,
       signal: options.signal,
       cache: "no-store",
+      credentials: "include",
     });
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") throw err;

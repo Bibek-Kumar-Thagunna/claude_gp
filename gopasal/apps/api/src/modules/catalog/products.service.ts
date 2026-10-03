@@ -19,6 +19,10 @@ import {
   type ProductSort,
   type ProductStockFilter,
 } from './dto/catalog.dto';
+import {
+  DELIVERABLE_PRODUCT_WHERE,
+  STOREFRONT_SHOP_WHERE,
+} from './storefront-eligibility';
 
 export interface ProductInput {
   name: string;
@@ -213,9 +217,9 @@ export class ProductsService {
 
   // ── public ───────────────────────────────────────────────────────────
   async listByShop(shopId: string, pagination: PaginationDto, categoryId?: string) {
-    const where = {
+    const where: Prisma.ProductWhereInput = {
       shopId,
-      isActive: true,
+      ...DELIVERABLE_PRODUCT_WHERE,
       ...(categoryId ? { categoryId } : {}),
       ...(pagination.q ? { name: { contains: pagination.q, mode: 'insensitive' as const } } : {}),
     };
@@ -233,8 +237,12 @@ export class ProductsService {
   }
 
   async get(productId: string) {
-    const p = await this.prisma.product.findUnique({
-      where: { id: productId },
+    const p = await this.prisma.product.findFirst({
+      where: {
+        id: productId,
+        ...DELIVERABLE_PRODUCT_WHERE,
+        shop: STOREFRONT_SHOP_WHERE,
+      },
       include: { variants: { where: { isActive: true } }, shop: { select: { id: true, name: true, slug: true } } },
     });
     if (!p) throw new NotFoundException('Product not found');

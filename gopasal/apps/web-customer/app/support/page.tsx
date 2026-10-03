@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import {
   Mail,
-  Phone,
   MessageCircle,
   Truck,
   RotateCcw,
@@ -13,6 +12,7 @@ import {
 } from "lucide-react";
 import { Container, Button, Badge } from "@/components/primitives";
 import { Reveal } from "@/components/Reveal";
+import { SupportTickets } from "@/components/support/SupportTickets";
 
 export const metadata: Metadata = {
   title: "Help & Support",
@@ -84,7 +84,7 @@ export default function SupportPage() {
       {/* Contact channels */}
       <section className="py-12 md:py-16">
         <Container>
-          <div className="grid gap-5 sm:grid-cols-2">
+          <div className="grid gap-5">
             <Reveal>
               <a
                 href="mailto:hello@gopasal.com"
@@ -96,17 +96,6 @@ export default function SupportPage() {
                 <span>
                   <span className="block text-sm text-ink-500">Email us</span>
                   <span className="block text-lg font-bold text-ink-900">hello@gopasal.com</span>
-                </span>
-              </a>
-            </Reveal>
-            <Reveal delay={1}>
-              <a href="tel:+97716000000" className="gp-card flex items-center gap-4 p-6">
-                <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-crimson-50 text-crimson-600">
-                  <Phone className="h-6 w-6" />
-                </span>
-                <span>
-                  <span className="block text-sm text-ink-500">Call us</span>
-                  <span className="block text-lg font-bold text-ink-900">+977 1 6000000</span>
                 </span>
               </a>
             </Reveal>
@@ -159,6 +148,10 @@ export default function SupportPage() {
             ))}
           </div>
         </Container>
+      </section>
+
+      <section className="mt-12 border-t border-ink-100 pt-12">
+        <Container><SupportTickets /></Container>
       </section>
     </div>
   );

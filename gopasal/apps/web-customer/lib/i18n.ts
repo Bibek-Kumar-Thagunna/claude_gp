@@ -24,7 +24,7 @@ export const dict = {
     en: "Search shops, groceries, medicines…",
     np: "पसल, किराना, औषधि खोज्नुहोस्…",
   },
-  useLocation: { en: "Set your location", np: "स्थान छान्नुहोस्" },
+  useLocation: { en: "Browse local shops", np: "स्थानीय पसलहरू हेर्नुहोस्" },
   shopsNearYou: { en: "Shops near you", np: "तपाईं नजिकका पसल" },
   browseCategories: { en: "Browse by category", np: "श्रेणी अनुसार हेर्नुहोस्" },
   popularNow: { en: "Popular right now", np: "अहिले लोकप्रिय" },

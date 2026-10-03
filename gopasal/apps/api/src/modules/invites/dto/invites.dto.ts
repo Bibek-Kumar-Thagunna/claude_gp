@@ -23,7 +23,7 @@ export class CreateInviteDto {
 /**
  * Accept an invite. Either arm works:
  *   - `token`         → the person opened the link
- *   - `phone` + `code` → the person was read the code over the phone
+ *   - `code`           → the person was read the code over the phone
  * Both still require an authenticated session on the invited number.
  */
 export class AcceptInviteDto {
@@ -36,6 +36,16 @@ export class AcceptInviteDto {
   @IsString()
   @Length(4, 8)
   code?: string;
+
+  /**
+   * Code-entry screens send their own console scope. This keeps a shop code in
+   * the seller console and a platform code in the admin console when the same
+   * phone has invitations in both places. Link tokens already identify one
+   * exact invitation, so scope is optional for that path.
+   */
+  @IsOptional()
+  @IsIn(['SHOP', 'PLATFORM'])
+  scope?: 'SHOP' | 'PLATFORM';
 }
 
 export class InviteListQueryDto {
