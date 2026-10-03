@@ -30,6 +30,8 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 .idea/
+.claude/
+.agents/
 
 # testing
 coverage/

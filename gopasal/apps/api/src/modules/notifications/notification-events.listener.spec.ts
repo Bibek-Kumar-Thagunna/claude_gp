@@ -7,15 +7,32 @@ type Job = { userId: string; type: string; title: string; body: string; data?: R
 function listener(opts: { rider?: { userId: string } | null; order?: Record<string, unknown> | null }) {
   const jobs: Job[] = [];
   const prisma = {
-    rider: { findUnique: async () => (opts.rider === undefined ? { userId: "user_rider" } : opts.rider) },
+    rider: {
+      findUnique: () =>
+        Promise.resolve(opts.rider === undefined ? { userId: "user_rider" } : opts.rider),
+    },
     order: {
-      findUnique: async () =>
-        opts.order === undefined
-          ? { code: "GP-1", area: "Baneshwor", total: 360, paymentMethod: "COD", shop: { name: "Ram Kirana" } }
-          : opts.order,
+      findUnique: () =>
+        Promise.resolve(
+          opts.order === undefined
+            ? {
+                code: "GP-1",
+                area: "Baneshwor",
+                total: 360,
+                paymentMethod: "COD",
+                shop: { name: "Ram Kirana" },
+              }
+            : opts.order,
+        ),
     },
   };
-  const queue = { enqueue: async (job: Job) => void jobs.push(job), enqueueMany: async () => undefined };
+  const queue = {
+    enqueue: (job: Job) => {
+      jobs.push(job);
+      return Promise.resolve();
+    },
+    enqueueMany: () => Promise.resolve(),
+  };
   const l = new NotificationEventsListener(prisma as never, queue as never, {} as never);
   return { l, jobs };
 }

@@ -1,3 +1,12 @@
 packages:
   - "apps/*"
   - "packages/*"
+
+# These advisories are confined to Expo/Metro development and build tooling.
+# Neither package is loaded by the production API or web applications, and no
+# patched upstream release currently exists. Remove each exception as soon as
+# Expo publishes a dependency chain containing a fix.
+auditConfig:
+  ignoreGhsas:
+    - GHSA-86w9-cpqp-85rv
+    - GHSA-vfj7-8cjw-p6xm

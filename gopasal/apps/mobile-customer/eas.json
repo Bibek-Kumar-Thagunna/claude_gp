@@ -1,0 +1,69 @@
+{
+  "//": [
+    "Build profiles for the GoPasal customer app.",
+    "",
+    "Each profile sets APP_ENV, which app.config.ts turns into the app's name,",
+    "its bundle identifier and the API it talks to. That is the whole mechanism:",
+    "there is no second place where an environment is decided, so a build cannot",
+    "disagree with itself about which API it is for.",
+    "",
+    "Before the first build, run `eas init` in this folder once. It writes the",
+    "project id into the config, which is what Expo's push service issues device",
+    "tokens against — without it, push registration returns null and the app",
+    "runs on without notifications rather than failing.",
+    "",
+    "development  a dev client for a real handset. Talks to the API on the",
+    "             laptop running Metro, by LAN address worked out at runtime.",
+    "preview      an installable APK for testers. Staging API. Side by side with",
+    "             production, because a tester who must uninstall the real app",
+    "             to try a candidate will not try it.",
+    "production   the store build."
+  ],
+  "cli": {
+    "version": ">= 12.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {
+        "APP_ENV": "local"
+      },
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleDebug"
+      },
+      "ios": {
+        "simulator": true
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "channel": "preview",
+      "env": {
+        "APP_ENV": "staging"
+      },
+      "android": {
+        "buildType": "apk"
+      },
+      "ios": {
+        "simulator": false
+      }
+    },
+    "production": {
+      "distribution": "store",
+      "channel": "production",
+      "autoIncrement": true,
+      "env": {
+        "APP_ENV": "production"
+      },
+      "android": {
+        "buildType": "app-bundle"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}
