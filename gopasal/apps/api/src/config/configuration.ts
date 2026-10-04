@@ -9,7 +9,7 @@
  *     implementation is chosen HERE by a `*_PROVIDER` variable. Local
  *     development selects an implementation that genuinely works offline (the
  *     SMS provider prints the message, the map provider computes distances
- *     locally, storage writes to disk / MinIO). Production selects the vendor.
+ *     locally, storage writes to disk / RustFS). Production selects the vendor.
  *
  *  2. A provider is never silently downgraded. If you ask for Sparrow and the
  *     token is absent, `validateConfig` refuses to start instead of quietly
@@ -166,7 +166,7 @@ export interface AppConfig {
       bucket?: string;
       accessKey?: string;
       secretKey?: string;
-      /** MinIO and most S3 clones need path-style addressing. */
+      /** RustFS and most S3 clones need path-style addressing. */
       forcePathStyle: boolean;
       /** CDN or public bucket URL; falls back to the endpoint. */
       publicBaseUrl?: string;
@@ -443,7 +443,9 @@ export function inspectConfig(cfg: AppConfig): ConfigReport {
     problems.push("METRICS_PORT must be between 1 and 65535");
   }
   if (cfg.metrics.port === cfg.port) {
-    problems.push("METRICS_PORT must differ from PORT so metrics are not exposed by the public API ingress");
+    problems.push(
+      "METRICS_PORT must differ from PORT so metrics are not exposed by the public API ingress",
+    );
   }
   if (cfg.isDeployed && !cfg.metrics.enabled) {
     problems.push(`METRICS_ENABLED must be true in ${cfg.env}`);
@@ -480,7 +482,9 @@ export function inspectConfig(cfg: AppConfig): ConfigReport {
     );
   }
   if (!MALWARE_SCAN_PROVIDERS.includes(cfg.malwareScan.provider)) {
-    problems.push(`MALWARE_SCAN_PROVIDER="${cfg.malwareScan.provider}" is not implemented (choose ${listOf(MALWARE_SCAN_PROVIDERS)})`);
+    problems.push(
+      `MALWARE_SCAN_PROVIDER="${cfg.malwareScan.provider}" is not implemented (choose ${listOf(MALWARE_SCAN_PROVIDERS)})`,
+    );
   }
   if (cfg.malwareScan.provider === "clamav" && !cfg.malwareScan.host) {
     problems.push("MALWARE_SCAN_PROVIDER=clamav requires CLAMAV_HOST");
@@ -495,13 +499,21 @@ export function inspectConfig(cfg: AppConfig): ConfigReport {
     problems.push("CLAMAV_SCAN_TIMEOUT_MS must be between 1000 and 120000");
   }
   if (cfg.isDeployed && cfg.malwareScan.provider !== "clamav") {
-    problems.push(`MALWARE_SCAN_PROVIDER=clamav is required in ${cfg.env}; uploaded files must be scanned before storage`);
+    problems.push(
+      `MALWARE_SCAN_PROVIDER=clamav is required in ${cfg.env}; uploaded files must be scanned before storage`,
+    );
   }
-  if (cfg.isDeployed && cfg.malwareScan.provider === "clamav" && ["localhost", "127.0.0.1", "::1", "0.0.0.0"].includes(cfg.malwareScan.host ?? "")) {
+  if (
+    cfg.isDeployed &&
+    cfg.malwareScan.provider === "clamav" &&
+    ["localhost", "127.0.0.1", "::1", "0.0.0.0"].includes(cfg.malwareScan.host ?? "")
+  ) {
     problems.push(`CLAMAV_HOST must be a private scanner service address in ${cfg.env}`);
   }
   if (!cfg.isDeployed && cfg.malwareScan.provider === "disabled") {
-    warnings.push("MALWARE_SCAN_PROVIDER=disabled — local uploads are not malware-scanned; use the ClamAV container to test the production gate");
+    warnings.push(
+      "MALWARE_SCAN_PROVIDER=disabled — local uploads are not malware-scanned; use the ClamAV container to test the production gate",
+    );
   }
 
   // ── credentials for whatever was selected ─────────────────────────────────
@@ -521,7 +533,10 @@ export function inspectConfig(cfg: AppConfig): ConfigReport {
     );
   }
   if (cfg.maps.provider === "baato") {
-    if (!Number.isInteger(cfg.maps.baatoServerMonthlyLimit) || (cfg.maps.baatoServerMonthlyLimit ?? 0) < 1) {
+    if (
+      !Number.isInteger(cfg.maps.baatoServerMonthlyLimit) ||
+      (cfg.maps.baatoServerMonthlyLimit ?? 0) < 1
+    ) {
       problems.push("BAATO_SERVER_MONTHLY_LIMIT must be a positive integer");
     }
     if (!cfg.maps.baatoToken) {
@@ -556,7 +571,9 @@ export function inspectConfig(cfg: AppConfig): ConfigReport {
     problems.push("MAP_PIN_PROVIDER=google requires MAP_PIN_BROWSER_TOKEN");
   }
   if (tracking?.provider && tracking.provider !== cfg.maps.provider) {
-    problems.push("MAP_TRACKING_PROVIDER must match MAP_PROVIDER (Google tracking is not supported)");
+    problems.push(
+      "MAP_TRACKING_PROVIDER must match MAP_PROVIDER (Google tracking is not supported)",
+    );
   }
   if (cfg.maps.styleUrl) {
     try {
@@ -800,13 +817,14 @@ export function inspectConfig(cfg: AppConfig): ConfigReport {
           problems.push(`CORS_ORIGINS entry must use https in ${cfg.env}: ${origin}`);
         }
         if (parsed.origin !== origin) {
-          problems.push(`CORS_ORIGINS entry must be an origin only (scheme and host, no path): ${origin}`);
+          problems.push(
+            `CORS_ORIGINS entry must be an origin only (scheme and host, no path): ${origin}`,
+          );
         }
-        if (
-          parsed.hostname === "example.invalid" ||
-          parsed.hostname.endsWith(".example.invalid")
-        ) {
-          problems.push(`CORS_ORIGINS still contains the reserved deployment placeholder: ${origin}`);
+        if (parsed.hostname === "example.invalid" || parsed.hostname.endsWith(".example.invalid")) {
+          problems.push(
+            `CORS_ORIGINS still contains the reserved deployment placeholder: ${origin}`,
+          );
         }
       } catch {
         problems.push(`CORS_ORIGINS entry must be a valid absolute origin: ${origin}`);

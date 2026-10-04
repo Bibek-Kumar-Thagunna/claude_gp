@@ -21,7 +21,7 @@
 # occupying the host port, and never deletes data.
 #
 # Everything the API needs that is not a paid third-party account runs here:
-# PostgreSQL, Redis, and — under the optional "s3" profile — MinIO, which speaks
+# PostgreSQL, Redis, and — under the optional "s3" profile — RustFS, which speaks
 # the same S3 API as Cloudflare R2 / AWS S3 / DigitalOcean Spaces so the
 # production storage code path can be exercised locally.
 #
@@ -102,21 +102,39 @@ services:
 
   # ── optional: local S3 ────────────────────────────────────────────────────────
   # Only starts with `--profile s3`, because the default STORAGE_PROVIDER=local
-  # writes to ./apps/api/uploads and needs nothing running. Switch to MinIO when
+  # writes to ./apps/api/uploads and needs nothing running. Switch to RustFS when
   # you want the *production* code path — signed SigV4 PUT/DELETE against a real
-  # S3 API — under test locally. Same code, different endpoint.
+  # S3 API — under test locally. Same code, different endpoint. The service name
+  # remains `minio` so existing local S3 endpoint URLs keep working.
+  minio-permissions:
+    image: busybox:1.37.0@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e
+    profiles: ["s3"]
+    command: ["chown", "-R", "10001:10001", "/data"]
+    volumes:
+      - gopasal_miniodata:/data
+    restart: "no"
+
   minio:
-    image: quay.io/minio/minio:RELEASE.2024-09-13T20-26-02Z
+    # MinIO removed its community images in 2026. RustFS is an actively
+    # maintained, Apache-2.0 S3-compatible replacement with no account or
+    # license key. Pin the multi-architecture image digest for reproducibility.
+    image: rustfs/rustfs:1.0.0@sha256:8cc9801755448b71a786705ce76692c77e14936cccd87cf2fc31842e58f4d1ff
     container_name: gopasal-minio
     profiles: ["s3"]
+    depends_on:
+      minio-permissions:
+        condition: service_completed_successfully
     restart: unless-stopped
-    command: ["server", "/data", "--console-address", ":9001"]
+    command: ["/data"]
     environment:
       # Development-only credentials, and they never leave this machine: both
       # ports are bound to 127.0.0.1. apps/api/.env must repeat them as
       # S3_ACCESS_KEY / S3_SECRET_KEY.
-      MINIO_ROOT_USER: gopasal_dev
-      MINIO_ROOT_PASSWORD: gopasal_dev_secret
+      RUSTFS_ACCESS_KEY: gopasal_dev
+      RUSTFS_SECRET_KEY: gopasal_dev_secret
+      RUSTFS_ADDRESS: 0.0.0.0:9000
+      RUSTFS_CONSOLE_ADDRESS: 0.0.0.0:9001
+      RUSTFS_CONSOLE_ENABLE: "true"
     ports:
       # HOST 127.0.0.1:19000 -> CONTAINER 9000 (S3 API), and 19001 -> 9001 (console).
       # Non-default host ports for the same reason as PostgreSQL above: 9000 is one
@@ -129,30 +147,50 @@ services:
     volumes:
       - gopasal_miniodata:/data
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:9000/health"]
       interval: 5s
       timeout: 5s
       retries: 20
+      start_period: 10s
 
   # One-shot: create the bucket, REMOVE any old bucket-wide public policy, then
   # allow anonymous GET only under public/. Private KYC/support/delivery evidence
   # shares this bucket and must never inherit a root download policy. Re-running
-  # this job also repairs an older local MinIO volume with the unsafe policy.
+  # this job also repairs an older local S3 volume with the unsafe policy.
   minio-init:
-    image: quay.io/minio/mc:RELEASE.2024-09-16T17-43-14Z
+    image: amazon/aws-cli:2.31.13@sha256:e14216fb361cce909ce199616711ad103182d5937f851cda9bebf25867d7180a
     container_name: gopasal-minio-init
     profiles: ["s3"]
     depends_on:
       minio:
         condition: service_healthy
-    entrypoint: >
-      /bin/sh -c "
-      mc alias set gp http://minio:9000 gopasal_dev gopasal_dev_secret &&
-      mc mb --ignore-existing gp/${S3_BUCKET:-gopasal-dev} &&
-      mc anonymous set private gp/${S3_BUCKET:-gopasal-dev} &&
-      mc anonymous set download gp/${S3_BUCKET:-gopasal-dev}/public &&
-      echo 'bucket ${S3_BUCKET:-gopasal-dev} ready: only public/ is anonymously downloadable'
-      "
+    environment:
+      AWS_ACCESS_KEY_ID: gopasal_dev
+      AWS_SECRET_ACCESS_KEY: gopasal_dev_secret
+      AWS_DEFAULT_REGION: us-east-1
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        endpoint=http://minio:9000
+        bucket="$${S3_BUCKET:-gopasal-dev}"
+        aws s3api head-bucket --bucket "$$bucket" --endpoint-url "$$endpoint" >/dev/null 2>&1 || \
+          aws s3api create-bucket --bucket "$$bucket" --endpoint-url "$$endpoint" >/dev/null
+        cat > /tmp/public-policy.json <<POLICY
+        {
+          "Version": "2012-10-17",
+          "Statement": [{
+            "Sid": "PublicReadOnlyForPublicPrefix",
+            "Effect": "Allow",
+            "Principal": "*",
+            "Action": ["s3:GetObject"],
+            "Resource": ["arn:aws:s3:::$$bucket/public/*"]
+          }]
+        }
+        POLICY
+        aws s3api put-bucket-policy --bucket "$$bucket" \
+          --policy file:///tmp/public-policy.json --endpoint-url "$$endpoint"
+        echo "bucket $$bucket ready: only public/ is anonymously downloadable"
     restart: "no"
 
 volumes:

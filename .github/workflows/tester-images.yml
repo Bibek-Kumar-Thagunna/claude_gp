@@ -81,8 +81,21 @@ jobs:
           cache-from: type=gha,scope=tester-${{ matrix.surface }}
           cache-to: type=gha,mode=max,scope=tester-${{ matrix.surface }}
 
-  bundle:
+  verify-public:
     needs: publish
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Prove every tester image is anonymously downloadable
+        run: |
+          set -euo pipefail
+          for surface in api customer seller admin rider; do
+            docker manifest inspect \
+              "ghcr.io/bibek-kumar-thagunna/gopasal-tester-${surface}:latest" >/dev/null
+          done
+
+  bundle:
+    # Never hand a tester a launcher whose images are missing or private.
+    needs: verify-public
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4

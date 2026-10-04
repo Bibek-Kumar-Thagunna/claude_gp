@@ -21,7 +21,7 @@
     "lint": "APP_ENV=${APP_ENV:-local} turbo run lint",
     "typecheck": "APP_ENV=${APP_ENV:-local} turbo run typecheck",
     "test": "APP_ENV=${APP_ENV:-test} turbo run test",
-    "audit:prod": "pnpm audit --prod --audit-level moderate",
+    "audit:prod": "node scripts/audit-production.mjs",
     "clean": "turbo run clean && rm -rf node_modules",
     "db:up": "node scripts/db-ports.mjs check && docker compose up -d",
     "db:down": "docker compose down",

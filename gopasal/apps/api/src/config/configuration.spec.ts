@@ -106,10 +106,21 @@ describe("configuration loader", () => {
     );
   });
   it("requires a real malware scanner in deployed environments", () => {
-    assert.match(inspectConfig(configuration({ ...PROD, MALWARE_SCAN_PROVIDER: "disabled" })).problems.join(" "), /MALWARE_SCAN_PROVIDER=clamav is required/);
+    assert.match(
+      inspectConfig(configuration({ ...PROD, MALWARE_SCAN_PROVIDER: "disabled" })).problems.join(
+        " ",
+      ),
+      /MALWARE_SCAN_PROVIDER=clamav is required/,
+    );
     assert.match(problemsOf({ MALWARE_SCAN_PROVIDER: "clamav" }).join(" "), /requires CLAMAV_HOST/);
-    assert.match(inspectConfig(configuration({ ...PROD, CLAMAV_HOST: "127.0.0.1" })).problems.join(" "), /private scanner service address/);
-    assert.deepEqual(mentioning(inspectConfig(configuration(PROD)).problems, "MALWARE_SCAN_PROVIDER"), []);
+    assert.match(
+      inspectConfig(configuration({ ...PROD, CLAMAV_HOST: "127.0.0.1" })).problems.join(" "),
+      /private scanner service address/,
+    );
+    assert.deepEqual(
+      mentioning(inspectConfig(configuration(PROD)).problems, "MALWARE_SCAN_PROVIDER"),
+      [],
+    );
   });
   it("keeps the OTP rails at values worth having, without being told", () => {
     const cfg = load();
@@ -149,7 +160,9 @@ describe("configuration loader", () => {
   });
 
   it("allows a Google address picker only with its browser key and leaves tracking on the base map", () => {
-    assert.ok(mentioning(problemsOf({ MAP_PIN_PROVIDER: "google" }), "MAP_PIN_BROWSER_TOKEN").length > 0);
+    assert.ok(
+      mentioning(problemsOf({ MAP_PIN_PROVIDER: "google" }), "MAP_PIN_BROWSER_TOKEN").length > 0,
+    );
     const maps = load({
       MAP_PROVIDER: "baato",
       BAATO_ACCESS_TOKEN: "server",
@@ -159,7 +172,10 @@ describe("configuration loader", () => {
     }).maps;
     assert.equal(maps.surfaces?.pin.provider, "google");
     assert.equal(maps.surfaces?.tracking.provider, undefined);
-    assert.ok(mentioning(problemsOf({ MAP_TRACKING_PROVIDER: "google" }), "MAP_TRACKING_PROVIDER").length > 0);
+    assert.ok(
+      mentioning(problemsOf({ MAP_TRACKING_PROVIDER: "google" }), "MAP_TRACKING_PROVIDER").length >
+        0,
+    );
   });
 
   it("parses booleans and falls back on unparseable numbers", () => {
@@ -374,9 +390,7 @@ describe("inspectConfig — provider selection", () => {
       /BAATO_MAP_STYLE/,
     );
     assert.match(
-      problemsOf({ ...credentials, BAATO_API_BASE_URL: "http://api.baato.io/api/v1" }).join(
-        " ",
-      ),
+      problemsOf({ ...credentials, BAATO_API_BASE_URL: "http://api.baato.io/api/v1" }).join(" "),
       /must use HTTPS/,
     );
   });
@@ -396,7 +410,7 @@ describe("inspectConfig — provider selection", () => {
     assert.equal(mentioning(found, "S3_SECRET_KEY").length, 1);
   });
 
-  it("accepts the documented MinIO setup as a complete s3 configuration", () => {
+  it("accepts the documented local S3 setup as a complete s3 configuration", () => {
     assert.deepEqual(
       problemsOf({
         STORAGE_PROVIDER: "s3",

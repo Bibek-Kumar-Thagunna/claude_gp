@@ -119,7 +119,12 @@ jobs:
           # the disposable API and clearing only this job's isolated Redis keeps
           # the independent RBAC proof deterministic without weakening limits.
           stop_api
-          redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" FLUSHDB >/dev/null
+          pnpm --filter @gopasal/api exec node -e '
+            const Redis = require("ioredis");
+            const client = new Redis({ host: process.env.REDIS_HOST, port: Number(process.env.REDIS_PORT) });
+            (async () => { await client.flushdb(); await client.quit(); })()
+              .catch((error) => { console.error(error); client.disconnect(); process.exit(1); });
+          '
           pnpm db:seed
           start_api
           pnpm verify:auth-rbac

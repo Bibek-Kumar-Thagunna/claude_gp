@@ -1,4 +1,4 @@
-import { createHash, createHmac } from 'node:crypto';
+import { createHash, createHmac } from "node:crypto";
 
 /**
  * AWS Signature Version 4 for a single S3 request, written directly against the
@@ -8,7 +8,7 @@ import { createHash, createHmac } from 'node:crypto';
  * DeleteObject, SigV4 is a stable and fully specified algorithm, and this keeps
  * the API's dependency list — the thing that has to be audited before a
  * production deploy — one package shorter. It is also what lets the *same* code
- * path talk to MinIO locally and to S3/R2/Spaces in production: the difference
+ * path talk to RustFS locally and to S3/R2/Spaces in production: the difference
  * is a hostname and a region, not a library.
  *
  * Verified in aws-sigv4.spec.ts against the canonical request AWS publishes for
@@ -31,12 +31,16 @@ export interface SignInput {
   now?: Date;
 }
 
-const sha256 = (data: Buffer | string): string => createHash('sha256').update(data).digest('hex');
-const hmac = (key: Buffer | string, data: string): Buffer => createHmac('sha256', key).update(data).digest();
+const sha256 = (data: Buffer | string): string => createHash("sha256").update(data).digest("hex");
+const hmac = (key: Buffer | string, data: string): Buffer =>
+  createHmac("sha256", key).update(data).digest();
 
 /** 20260823T041500Z / 20260823 — the two timestamp forms SigV4 uses. */
 function stamps(now: Date): { amzDate: string; dateStamp: string } {
-  const iso = now.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+  const iso = now
+    .toISOString()
+    .replace(/[-:]/g, "")
+    .replace(/\.\d{3}/, "");
   return { amzDate: iso, dateStamp: iso.slice(0, 8) };
 }
 
@@ -47,14 +51,14 @@ function stamps(now: Date): { amzDate: string; dateStamp: string } {
  */
 export function encodeS3Path(path: string): string {
   return path
-    .split('/')
+    .split("/")
     .map((segment) =>
       encodeURIComponent(segment).replace(
         /[!'()*]/g,
         (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`,
       ),
     )
-    .join('/');
+    .join("/");
 }
 
 /**
@@ -78,26 +82,26 @@ export function signatureParts(input: SignInput): SignatureParts {
   const { amzDate, dateStamp } = stamps(input.now ?? new Date());
   const payloadHash = sha256(input.payload);
 
-  // Host must be signed; the port is part of it for MinIO on localhost:9100.
+  // Host must be signed; the port is part of it for local S3 on localhost:9100.
   const headers: Record<string, string> = {
     host: url.host,
-    'x-amz-content-sha256': payloadHash,
-    'x-amz-date': amzDate,
+    "x-amz-content-sha256": payloadHash,
+    "x-amz-date": amzDate,
   };
   for (const [k, v] of Object.entries(input.headers ?? {})) {
-    headers[k.toLowerCase()] = v.trim().replace(/\s+/g, ' ');
+    headers[k.toLowerCase()] = v.trim().replace(/\s+/g, " ");
   }
 
   const signedHeaderNames = Object.keys(headers).sort();
-  const canonicalHeaders = signedHeaderNames.map((h) => `${h}:${headers[h]}\n`).join('');
-  const signedHeaders = signedHeaderNames.join(';');
+  const canonicalHeaders = signedHeaderNames.map((h) => `${h}:${headers[h]}\n`).join("");
+  const signedHeaders = signedHeaderNames.join(";");
 
   // Query parameters are sorted by name, then value, and encoded individually.
   const query = [...url.searchParams.entries()]
     .map(([k, v]) => [encodeURIComponent(k), encodeURIComponent(v)] as const)
     .sort((a, b) => (a[0] === b[0] ? a[1].localeCompare(b[1]) : a[0].localeCompare(b[0])))
     .map(([k, v]) => `${k}=${v}`)
-    .join('&');
+    .join("&");
 
   const canonicalRequest = [
     input.method.toUpperCase(),
@@ -106,16 +110,16 @@ export function signatureParts(input: SignInput): SignatureParts {
     canonicalHeaders,
     signedHeaders,
     payloadHash,
-  ].join('\n');
+  ].join("\n");
 
   const scope = `${dateStamp}/${input.region}/${input.service}/aws4_request`;
-  const stringToSign = ['AWS4-HMAC-SHA256', amzDate, scope, sha256(canonicalRequest)].join('\n');
+  const stringToSign = ["AWS4-HMAC-SHA256", amzDate, scope, sha256(canonicalRequest)].join("\n");
 
   const signingKey = hmac(
     hmac(hmac(hmac(`AWS4${input.secretKey}`, dateStamp), input.region), input.service),
-    'aws4_request',
+    "aws4_request",
   );
-  const signature = createHmac('sha256', signingKey).update(stringToSign).digest('hex');
+  const signature = createHmac("sha256", signingKey).update(stringToSign).digest("hex");
 
   return {
     canonicalRequest,
@@ -125,8 +129,8 @@ export function signatureParts(input: SignInput): SignatureParts {
     headers: {
       ...input.headers,
       Host: url.host,
-      'x-amz-content-sha256': payloadHash,
-      'x-amz-date': amzDate,
+      "x-amz-content-sha256": payloadHash,
+      "x-amz-date": amzDate,
       Authorization:
         `AWS4-HMAC-SHA256 Credential=${input.accessKey}/${scope}, ` +
         `SignedHeaders=${signedHeaders}, Signature=${signature}`,
@@ -142,4 +146,3 @@ export function signatureParts(input: SignInput): SignatureParts {
 export function signRequest(input: SignInput): Record<string, string> {
   return signatureParts(input).headers;
 }
-

@@ -8,8 +8,9 @@ FIRST TIME
 3. Open Docker Desktop and wait until it says the engine is running.
 4. Double-click Start-GoPasal.cmd.
 
-The first start downloads the platform and can take several minutes. Later
-starts are much faster. A browser page opens when every service is ready.
+The first start downloads the platform from GoPasal's public GitHub container
+packages and can take several minutes. No GitHub login is required. Later starts
+are much faster. A browser page opens when every service is ready.
 
 EVERYDAY USE
 - Start-GoPasal.cmd: starts GoPasal and checks for a tested update.

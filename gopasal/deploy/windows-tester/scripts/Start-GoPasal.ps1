@@ -27,7 +27,7 @@ try {
       if ($LASTEXITCODE -ne 0) { $missingImage = $true }
     }
     if ($missingImage) {
-      throw "GoPasal could not be downloaded and no complete saved copy exists yet. Check the internet connection and try again."
+      throw "The public GoPasal tester build could not be downloaded and no complete saved copy exists yet. Check the internet connection. If other sites work, ask the developer to confirm that GitHub Actions finished publishing the tester build, then run Update-GoPasal again."
     }
     Write-Warning "The update check failed, so the saved GoPasal version will be used."
   }
