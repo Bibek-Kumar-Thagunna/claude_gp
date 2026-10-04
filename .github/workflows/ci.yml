@@ -90,10 +90,24 @@ jobs:
               wait "$api_pid" >/dev/null 2>&1 || true
               api_pid=""
             fi
+            # A second API must never be health-checked against a survivor of
+            # the first one, so prove the port is actually closed.
+            for attempt in {1..30}; do
+              if ! curl --silent --output /dev/null http://127.0.0.1:4000/api/v1/health/ready; then
+                return 0
+              fi
+              sleep 1
+            done
+            echo "The previous API is still listening on port 4000."
+            return 1
           }
 
           start_api() {
-            pnpm --filter @gopasal/api start >>"$api_log" 2>&1 &
+            # Run node directly (what `pnpm --filter @gopasal/api start` runs).
+            # Going through pnpm made $! the wrapper's PID: killing it left the
+            # real node process alive, still holding port 4000 and its
+            # in-memory rate-limit counters.
+            ( cd apps/api && exec node dist/main.js ) >>"$api_log" 2>&1 &
             api_pid=$!
             for attempt in {1..30}; do
               if curl --fail --silent --show-error http://127.0.0.1:4000/api/v1/health/ready >/dev/null; then
