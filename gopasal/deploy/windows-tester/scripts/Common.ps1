@@ -48,8 +48,11 @@ GOPASAL_IMAGE_TAG=latest
 }
 
 function Invoke-Compose {
-  param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments)
-  & docker compose --env-file $script:EnvFile -f $script:ComposeFile @Arguments
+  # Deliberately a plain function that forwards $args. A [Parameter()] block
+  # would make this an advanced function, and PowerShell would then swallow
+  # short Docker flags as its own common parameters (-d becomes -Debug), so
+  # "up -d" would run attached and the launcher would hang on the database logs.
+  & docker compose --env-file $script:EnvFile -f $script:ComposeFile @args
   if ($LASTEXITCODE -ne 0) {
     throw "Docker could not complete the requested GoPasal operation."
   }
